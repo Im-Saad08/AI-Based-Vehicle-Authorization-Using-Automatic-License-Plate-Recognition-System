@@ -1,7 +1,6 @@
 from detect_and_crop_plate import detect_and_crop
 from recognize_plate import recognize_plate
 from authorize_vehicle import authorize_vehicle
-from enhance_plate import enhance_plate
 from logger import log_entry
 
 import os
@@ -15,19 +14,15 @@ import os
 # 3. List of selected images
 # ----------------------------------------
 
-INPUT_PATH = "img/input/Cars/DSC_1049.jpg"
-#INPUT_PATH = "img/output/enhanced_plates/contrast_enhanced.png"
+INPUT_PATH = "img/evaluation/authorized"
 
 # Examples:
-#
-# INPUT_PATH = "img/input/car_3.jpg"
 #
 # INPUT_PATH = "img/input"
 #
 # INPUT_PATH = [
-#     "img/input/car_1.jpg",
-#     "img/input/car_3.jpg",
-#     "img/input/car_5.jpg"
+#     "img/input/car1.jpg",
+#     "img/input/car2.jpg"
 # ]
 
 
@@ -37,7 +32,6 @@ INPUT_PATH = "img/input/Cars/DSC_1049.jpg"
 
 image_paths = []
 
-# Case 1: Multiple selected images
 if isinstance(INPUT_PATH, list):
 
     for image in INPUT_PATH:
@@ -50,14 +44,10 @@ if isinstance(INPUT_PATH, list):
 
             print(f"Image not found: {image}")
 
-
-# Case 2: Single image
 elif os.path.isfile(INPUT_PATH):
 
     image_paths = [INPUT_PATH]
 
-
-# Case 3: Folder
 elif os.path.isdir(INPUT_PATH):
 
     image_paths = [
@@ -69,10 +59,9 @@ elif os.path.isdir(INPUT_PATH):
         if file.lower().endswith(
             (".jpg", ".jpeg", ".png")
         )
+
     ]
 
-
-# Invalid input
 else:
 
     print("Invalid input path.")
@@ -80,7 +69,7 @@ else:
 
 
 # ----------------------------------------
-# Check if images exist
+# Check images
 # ----------------------------------------
 
 if not image_paths:
@@ -90,7 +79,7 @@ if not image_paths:
 
 
 # ----------------------------------------
-# Start system
+# Start
 # ----------------------------------------
 
 print("\n" + "=" * 60)
@@ -99,55 +88,29 @@ print("=" * 60)
 
 
 # ----------------------------------------
-# Process every image
+# Process images
 # ----------------------------------------
 
 for IMAGE_PATH in image_paths:
 
-    print(
-        f"\nProcessing image: {IMAGE_PATH}"
-    )
-
-    # ----------------------------------------
-    # Step 1:
-    # Detect and crop license plates
-    # ----------------------------------------
+    print(f"\nProcessing image: {IMAGE_PATH}")
 
     cropped_plates = detect_and_crop(
         IMAGE_PATH
     )
 
-    # ----------------------------------------
-    # Check if plates were detected
-    # ----------------------------------------
-
     if len(cropped_plates) == 0:
 
-        print(
-            "\nNo license plates detected."
-        )
-
+        print("\nNo license plates detected.")
         continue
-
-
-    # ----------------------------------------
-    # Process each detected plate
-    # ----------------------------------------
 
     for plate in cropped_plates:
 
-        image_name = plate[
-            "image_name"
-        ]
+        image_name = plate["image_name"]
 
-        yolo_confidence = plate[
-            "yolo_confidence"
-        ]
+        yolo_confidence = plate["yolo_confidence"]
 
-        plate_image = plate[
-            "image"
-        ]
-
+        plate_image = plate["image"]
 
         print("\n" + "-" * 60)
 
@@ -156,7 +119,6 @@ for IMAGE_PATH in image_paths:
         )
 
         # ----------------------------------------
-        # Step 2:
         # OCR
         # ----------------------------------------
 
@@ -171,3 +133,100 @@ for IMAGE_PATH in image_paths:
         ocr_confidence = ocr_result[
             "confidence"
         ]
+
+        # ----------------------------------------
+        # Authorization
+        # ----------------------------------------
+
+        authorization = authorize_vehicle(
+            detected_plate
+        )
+
+        status = authorization[
+            "status"
+        ]
+
+        owner = authorization[
+            "owner"
+        ]
+
+        employee_id = authorization[
+            "employee_id"
+        ]
+
+        department = authorization[
+            "department"
+        ]
+
+        vehicle_type = authorization[
+            "vehicle_type"
+        ]
+
+        registration_year = authorization[
+            "registration_year"
+        ]
+
+        # ----------------------------------------
+        # Display Result
+        # ----------------------------------------
+
+        print()
+
+        print(
+            f"Detected Plate      : {detected_plate}"
+        )
+
+        print(
+            f"Registration Year   : {registration_year}"
+        )
+
+        print(
+            f"OCR Confidence      : {ocr_confidence:.2f}"
+        )
+
+        print(
+            f"YOLO Confidence     : {yolo_confidence:.2f}"
+        )
+
+        print()
+
+        print(
+            f"STATUS              : {status.upper()}"
+        )
+
+        print(
+            f"Owner               : {owner}"
+        )
+
+        print(
+            f"Employee ID         : {employee_id}"
+        )
+
+        print(
+            f"Department          : {department}"
+        )
+
+        print(
+            f"Vehicle Type        : {vehicle_type}"
+        )
+
+        # ----------------------------------------
+        # Log Entry
+        # ----------------------------------------
+
+        log_entry(
+            image_name=image_name,
+            plate_number=detected_plate,
+            registration_year=registration_year,
+            confidence=ocr_confidence,
+            status=status,
+            owner=owner,
+            employee_id=employee_id,
+            department=department,
+            vehicle_type=vehicle_type
+        )
+
+
+print("\n" + "=" * 60)
+print("PROCESSING COMPLETED")
+print("=" * 60)

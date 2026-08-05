@@ -350,18 +350,37 @@ print(
 # CONFIRM OR CORRECT DETAILS
 # ==================================================
 
+print("\n" + "=" * 50)
+print("ADMIN CONFIRMATION")
+print("=" * 50)
+
 print(
-    "\nAre the detected "
-    "registration details correct?"
+    f"Detected Plate : {detected_plate}"
 )
 
-confirmation = input(
-    "Enter Y to confirm or "
-    "N to correct: "
-).strip().upper()
+print(
+    f"Registration Year : "
+    f"{detected_registration_year}"
+)
+
+print(
+    "\nPress ENTER to accept the detected plate."
+)
+
+print(
+    "Or type the correct plate number."
+)
+
+corrected_plate = input(
+    "\nPlate: "
+).strip()
 
 
-if confirmation == "Y":
+# ------------------------------------------
+# Admin accepted OCR result
+# ------------------------------------------
+
+if corrected_plate == "":
 
     final_plate = detected_plate
 
@@ -370,57 +389,36 @@ if confirmation == "Y":
     )
 
 
-elif confirmation == "N":
+# ------------------------------------------
+# Admin corrected OCR result
+# ------------------------------------------
 
-    # ------------------------------------------
-    # Manually correct plate number
-    # ------------------------------------------
+else:
 
-    corrected_plate = input(
-        "\nEnter the correct "
-        "license plate number: "
-    ).strip()
-
-
-    # ------------------------------------------
-    # Normalize manually entered plate
-    # ------------------------------------------
-
-    corrected_result = (
-        normalize_plate_text(
-            corrected_plate
-        )
+    corrected_result = normalize_plate_text(
+        corrected_plate
     )
 
     final_plate = corrected_result[
         "plate_number"
     ]
 
-
-    # ------------------------------------------
-    # Ask for registration year
-    # ------------------------------------------
-
-    final_registration_year = input(
-        "Enter the registration year "
-        "(e.g., 08) or press Enter "
-        "to leave blank: "
+    entered_year = input(
+        "\nRegistration Year "
+        "(Press ENTER to keep detected year): "
     ).strip()
 
+    if entered_year == "":
 
-else:
+        final_registration_year = (
+            detected_registration_year
+        )
 
-    print(
-        "\nInvalid input."
-    )
+    else:
 
-    print(
-        "Registration cancelled."
-    )
-
-    exit()
-
-
+        final_registration_year = (
+            entered_year
+        )
 # ==================================================
 # CHECK FINAL PLATE
 # ==================================================
