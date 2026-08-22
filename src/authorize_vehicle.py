@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 from normalize_plate import normalize_plate_text
 
 
@@ -6,7 +7,11 @@ from normalize_plate import normalize_plate_text
 # Authorized vehicle database
 # ----------------------------------------
 
-VEHICLES_FILE = "data/vehicles.csv"
+VEHICLES_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data",
+    "vehicles.csv"
+)
 
 
 # ----------------------------------------
