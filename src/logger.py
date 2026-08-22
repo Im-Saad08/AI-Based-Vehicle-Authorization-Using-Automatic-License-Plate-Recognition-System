@@ -4,9 +4,25 @@ from datetime import datetime
 
 
 # ----------------------------------------
-# Entry log file
+# Project base directory
 # ----------------------------------------
-LOG_FILE = "data/entry_log.csv"
+BASE_DIR = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
+
+
+# ----------------------------------------
+# Entry log file
+# Always points to:
+# Vehicle Authorization System/data/entry_log.csv
+# ----------------------------------------
+LOG_FILE = os.path.join(
+    BASE_DIR,
+    "data",
+    "entry_log.csv"
+)
 
 
 # ----------------------------------------
@@ -24,16 +40,48 @@ def log_entry(
     registration_year=""
 ):
 
+    # ----------------------------------------
     # Get current date and time
+    # ----------------------------------------
     current_time = datetime.now()
 
-    date = current_time.strftime("%Y-%m-%d")
-    time = current_time.strftime("%H:%M:%S")
+    date = current_time.strftime(
+        "%Y-%m-%d"
+    )
 
-    # Check whether the log file already exists
-    file_exists = os.path.exists(LOG_FILE)
+    time = current_time.strftime(
+        "%H:%M:%S"
+    )
 
+
+    # ----------------------------------------
+    # Make sure data folder exists
+    # ----------------------------------------
+    os.makedirs(
+        os.path.dirname(LOG_FILE),
+        exist_ok=True
+    )
+
+
+    # ----------------------------------------
+    # Show exact file being updated
+    # ----------------------------------------
+    print(
+        f"Logging to: {os.path.abspath(LOG_FILE)}"
+    )
+
+
+    # ----------------------------------------
+    # Check whether log file already exists
+    # ----------------------------------------
+    file_exists = os.path.exists(
+        LOG_FILE
+    )
+
+
+    # ----------------------------------------
     # Open CSV in append mode
+    # ----------------------------------------
     with open(
         LOG_FILE,
         mode="a",
@@ -41,9 +89,14 @@ def log_entry(
         encoding="utf-8"
     ) as csv_file:
 
-        writer = csv.writer(csv_file)
+        writer = csv.writer(
+            csv_file
+        )
 
+
+        # ----------------------------------------
         # Create header if file does not exist
+        # ----------------------------------------
         if not file_exists:
 
             writer.writerow([
@@ -60,7 +113,10 @@ def log_entry(
                 "Vehicle_Type"
             ])
 
+
+        # ----------------------------------------
         # Add vehicle entry
+        # ----------------------------------------
         writer.writerow([
             date,
             time,
@@ -75,6 +131,10 @@ def log_entry(
             vehicle_type
         ])
 
+
+    # ----------------------------------------
+    # Confirm successful logging
+    # ----------------------------------------
     print(
         f"Entry logged successfully: "
         f"{plate_number}"
