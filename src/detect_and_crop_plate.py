@@ -1,160 +1,378 @@
 from ultralytics import YOLO
 import cv2
 import os
+import time
 
 
-# ----------------------------------------
-# Model path
-# ----------------------------------------
-MODEL_PATH = "run_model/detect/runs/license_plate_detector/weights/best.pt"
+# ============================================================
+# PROJECT ROOT
+# ============================================================
+
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
 
 
-# ----------------------------------------
-# Output folders
-# ----------------------------------------
-DETECTION_FOLDER = "img/output/detections"
-CROPPED_FOLDER = "img/output/cropped_plates"
+# ============================================================
+# MODEL PATH
+# ============================================================
+
+MODEL_PATH = os.path.join(
+    PROJECT_ROOT,
+    "models",
+    "trained",
+    "yolo11n_best.pt"
+)
 
 
-# ----------------------------------------
-# Load YOLO model once
-# ----------------------------------------
-model = YOLO(MODEL_PATH)
+# ============================================================
+# OUTPUT FOLDERS
+# ============================================================
+
+DETECTION_FOLDER = os.path.join(
+    PROJECT_ROOT,
+    "img",
+    "output",
+    "detections"
+)
+
+CROPPED_FOLDER = os.path.join(
+    PROJECT_ROOT,
+    "img",
+    "output",
+    "cropped_plates"
+)
+
+PREDICT_FOLDER = os.path.join(
+    PROJECT_ROOT,
+    "img",
+    "output",
+    "predict"
+)
 
 
-# ----------------------------------------
-# Detect and crop all license plates
-# ----------------------------------------
-def detect_and_crop(image_path):
+# ============================================================
+# LOAD LICENSE PLATE MODEL
+# ============================================================
 
-    # ----------------------------------------
-    # Read original image
-    # ----------------------------------------
-    image = cv2.imread(image_path)
+print(
+    f"\nLoading license plate model:"
+)
 
-    if image is None:
-        raise FileNotFoundError(
-            f"Unable to load image: {image_path}"
+print(
+    MODEL_PATH
+)
+
+model = YOLO(
+    MODEL_PATH
+)
+
+
+# ============================================================
+# DETECT AND CROP LICENSE PLATES
+# ============================================================
+
+def detect_and_crop(
+    image_input,
+    save_output=True,
+    image_name=None
+):
+
+    # ========================================================
+    # LOAD IMAGE
+    # ========================================================
+
+    if isinstance(
+        image_input,
+        str
+    ):
+
+        image = cv2.imread(
+            image_input
         )
 
-    # ----------------------------------------
-    # Keep a clean copy of the original image
-    # This image will be used for cropping
-    # ----------------------------------------
+        if image is None:
+
+            raise FileNotFoundError(
+                f"Unable to load image: "
+                f"{image_input}"
+            )
+
+        if image_name is None:
+
+            image_name = os.path.splitext(
+                os.path.basename(
+                    image_input
+                )
+            )[0]
+
+    else:
+
+        image = image_input.copy()
+
+        if image_name is None:
+
+            # Unique name for video/webcam frames
+            image_name = (
+                f"frame_"
+                f"{int(time.time() * 1000)}"
+            )
+
+
+    # ========================================================
+    # ORIGINAL IMAGE
+    # ========================================================
+
     original_image = image.copy()
 
-    # ----------------------------------------
-    # Create output folders if needed
-    # ----------------------------------------
-    os.makedirs(
-        DETECTION_FOLDER,
-        exist_ok=True
-    )
 
-    os.makedirs(
-        CROPPED_FOLDER,
-        exist_ok=True
-    )
+    # ========================================================
+    # CREATE OUTPUT FOLDERS
+    # ========================================================
 
-    # ----------------------------------------
-    # Extract image name
-    #
-    # Example:
-    # img/input/car_3.jpg
-    #        ↓
-    # car_3
-    # ----------------------------------------
-    image_name = os.path.splitext(
-        os.path.basename(image_path)
-    )[0]
+    if save_output:
 
-    # ----------------------------------------
-    # Run YOLO detection
-    # ----------------------------------------
+        os.makedirs(
+            DETECTION_FOLDER,
+            exist_ok=True
+        )
+
+        os.makedirs(
+            CROPPED_FOLDER,
+            exist_ok=True
+        )
+
+        os.makedirs(
+            PREDICT_FOLDER,
+            exist_ok=True
+        )
+
+
+    # ========================================================
+    # LICENSE PLATE DETECTION
+    # ========================================================
+
     results = model.predict(
-        source=image_path,
+
+        source=image,
+
         conf=0.5,
-        save=False
+
+        save=False,
+
+        verbose=False
+
     )
 
-    # ----------------------------------------
-    # Store cropped plate information
-    # ----------------------------------------
+
+    # ========================================================
+    # STORE DETECTED PLATES
+    # ========================================================
+
     cropped_plates = []
 
-    # ----------------------------------------
-    # Plate counter
-    # ----------------------------------------
+
+    # ========================================================
+    # PLATE COUNTER
+    # ========================================================
+
     plate_count = 1
 
-    # ----------------------------------------
-    # Process all detections
-    # ----------------------------------------
+
+    # ========================================================
+    # PROCESS DETECTIONS
+    # ========================================================
+
     for result in results:
+
+        if result.boxes is None:
+
+            continue
+
+
+        if len(result.boxes) == 0:
+
+            continue
+
 
         for box in result.boxes:
 
-            # ----------------------------------------
-            # Get bounding box coordinates
-            # ----------------------------------------
+            # =================================================
+            # BOUNDING BOX
+            # =================================================
+
             x1, y1, x2, y2 = map(
                 int,
                 box.xyxy[0]
             )
 
-            # ----------------------------------------
-            # Get YOLO detection confidence
-            # ----------------------------------------
+
+            # =================================================
+            # YOLO CONFIDENCE
+            # =================================================
+
             detection_confidence = float(
                 box.conf[0]
             )
 
-            # ----------------------------------------
-            # Crop plate from CLEAN original image
-            # ----------------------------------------
+
+            # =================================================
+            # IMAGE DIMENSIONS
+            # =================================================
+
+            height, width = (
+                original_image.shape[:2]
+            )
+
+
+            # =================================================
+            # KEEP COORDINATES INSIDE IMAGE
+            # =================================================
+
+            x1 = max(
+                0,
+                x1
+            )
+
+            y1 = max(
+                0,
+                y1
+            )
+
+            x2 = min(
+                width,
+                x2
+            )
+
+            y2 = min(
+                height,
+                y2
+            )
+
+
+            # =================================================
+            # VALIDATE BOX
+            # =================================================
+
+            if x2 <= x1 or y2 <= y1:
+
+                continue
+
+
+            # =================================================
+            # CROP PLATE
+            # =================================================
+
             plate_crop = original_image[
                 y1:y2,
                 x1:x2
             ].copy()
 
-            # ----------------------------------------
-            # Create cropped plate filename
-            #
-            # Example:
-            # car_3_plate_1.png
-            # car_3_plate_2.png
-            # ----------------------------------------
+
+            if plate_crop.size == 0:
+
+                continue
+
+
+            # =================================================
+            # UNIQUE PLATE FILENAME
+            # =================================================
+
             crop_filename = (
-                f"{image_name}_plate_{plate_count}.png"
+
+                f"{image_name}_"
+
+                f"plate_{plate_count}_"
+
+                f"conf_{detection_confidence:.2f}"
+
+                ".png"
+
             )
 
-            crop_path = os.path.join(
-                CROPPED_FOLDER,
-                crop_filename
+
+            # =================================================
+            # SAVE CROPPED PLATE
+            # =================================================
+
+            if save_output:
+
+                crop_path = os.path.join(
+
+                    CROPPED_FOLDER,
+
+                    crop_filename
+
+                )
+
+
+                cv2.imwrite(
+
+                    crop_path,
+
+                    plate_crop
+
+                )
+
+
+            # =================================================
+            # DRAW BOUNDING BOX
+            # =================================================
+
+            label = (
+
+                f"Plate "
+                f"{detection_confidence:.2f}"
+
             )
 
-            # ----------------------------------------
-            # Save clean cropped plate
-            # ----------------------------------------
-            cv2.imwrite(
-                crop_path,
-                plate_crop
-            )
 
-            # ----------------------------------------
-            # Draw bounding box ONLY on visualization image
-            # ----------------------------------------
             cv2.rectangle(
+
                 image,
+
                 (x1, y1),
+
                 (x2, y2),
+
                 (0, 255, 0),
+
                 2
+
             )
 
-            # ----------------------------------------
-            # Store information for main.py
-            # ----------------------------------------
+
+            cv2.putText(
+
+                image,
+
+                label,
+
+                (
+                    x1,
+                    max(
+                        y1 - 10,
+                        20
+                    )
+                ),
+
+                cv2.FONT_HERSHEY_SIMPLEX,
+
+                0.6,
+
+                (0, 255, 0),
+
+                2
+
+            )
+
+
+            # =================================================
+            # STORE PLATE INFORMATION
+            # =================================================
+
             cropped_plates.append({
 
                 "image_name":
@@ -164,46 +382,137 @@ def detect_and_crop(image_path):
                     plate_crop,
 
                 "yolo_confidence":
-                    detection_confidence
+                    detection_confidence,
+
+                "bbox": [
+
+                    x1,
+                    y1,
+                    x2,
+                    y2
+
+                ]
+
             })
 
-            # ----------------------------------------
-            # Move to next plate
-            # ----------------------------------------
+
             plate_count += 1
 
-    # ----------------------------------------
-    # Save detected image
-    # This image contains bounding boxes
-    # ----------------------------------------
-    detected_filename = (
-        f"{image_name}_detected.png"
-    )
 
-    detected_path = os.path.join(
-        DETECTION_FOLDER,
-        detected_filename
-    )
+    # ========================================================
+    # SAVE DETECTION OUTPUT
+    # ========================================================
 
-    cv2.imwrite(
-        detected_path,
-        image
-    )
+    if save_output:
 
-    # ----------------------------------------
-    # Print detection summary
-    # ----------------------------------------
-    print(
-        f"\nYOLO detected "
-        f"{len(cropped_plates)} plate(s)."
-    )
+        # ====================================================
+        # DETECTION IMAGE
+        # ====================================================
 
-    print(
-        f"Detection image saved at: "
-        f"{detected_path}"
-    )
+        detected_filename = (
 
-    # ----------------------------------------
-    # Return all detected plates
-    # ----------------------------------------
+            f"{image_name}_detected.png"
+
+        )
+
+
+        detected_path = os.path.join(
+
+            DETECTION_FOLDER,
+
+            detected_filename
+
+        )
+
+
+        cv2.imwrite(
+
+            detected_path,
+
+            image
+
+        )
+
+
+        # ====================================================
+        # YOLO-STYLE PREDICTION IMAGE
+        # ====================================================
+
+        predict_filename = (
+
+            f"{image_name}_predict.png"
+
+        )
+
+
+        predict_path = os.path.join(
+
+            PREDICT_FOLDER,
+
+            predict_filename
+
+        )
+
+
+        cv2.imwrite(
+
+            predict_path,
+
+            image
+
+        )
+
+
+        # ====================================================
+        # CONSOLE OUTPUT
+        # ====================================================
+
+        print(
+
+            f"\nYOLO detected "
+            f"{len(cropped_plates)} "
+            f"plate(s)."
+
+        )
+
+
+        print(
+
+            f"Detection image saved at: "
+            f"{detected_path}"
+
+        )
+
+
+        print(
+
+            f"Prediction image saved at: "
+            f"{predict_path}"
+
+        )
+
+
+        if cropped_plates:
+
+            print(
+                "\nDetected plates:"
+            )
+
+
+            for plate in cropped_plates:
+
+                print(
+
+                    f"  "
+                    f"{plate['image_name']} "
+                    f"Conf="
+                    f"{plate['yolo_confidence']:.2f}"
+
+                )
+
+
+    # ========================================================
+    # RETURN PLATES
+    # ========================================================
+
     return cropped_plates
