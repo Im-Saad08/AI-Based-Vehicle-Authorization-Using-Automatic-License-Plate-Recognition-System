@@ -23,7 +23,7 @@ MODEL_PATH = os.path.join(
     PROJECT_ROOT,
     "models",
     "trained",
-    "yolo11n_best.pt"
+    "rbflw_y8_best.pt"
 )
 
 
@@ -253,11 +253,24 @@ def detect_and_crop(
 
 
             # =================================================
-            # VALIDATE BOX
+            # VALIDATE BOX & MINIMUM SIZE (DISTANCE FILTER)
             # =================================================
 
             if x2 <= x1 or y2 <= y1:
 
+                continue
+
+            box_width = x2 - x1
+            box_height = y2 - y1
+
+            MIN_PLATE_WIDTH = 50   # Minimum width in pixels for readable plate
+            MIN_PLATE_HEIGHT = 15  # Minimum height in pixels for readable plate
+
+            if box_width < MIN_PLATE_WIDTH or box_height < MIN_PLATE_HEIGHT:
+                print(
+                    f"Skipping plate crop: Box dimensions too small "
+                    f"({box_width}x{box_height}px). Vehicle is too far."
+                )
                 continue
 
 

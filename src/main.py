@@ -1226,6 +1226,20 @@ def process_tracking_frame(
                 continue
 
             # =================================================
+            # MINIMUM VEHICLE SIZE (DISTANCE FILTER)
+            # =================================================
+
+            vehicle_w = x2 - x1
+            vehicle_h = y2 - y1
+
+            if vehicle_w < 100 or vehicle_h < 60:
+                print(
+                    f"Skipping vehicle Track ID {track_id}: "
+                    f"Vehicle box too small ({vehicle_w}x{vehicle_h}px). Vehicle is too far."
+                )
+                continue
+
+            # =================================================
             # VEHICLE CROP
             # =================================================
 
