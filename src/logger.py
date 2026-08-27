@@ -27,17 +27,13 @@ LOG_FILE = os.path.join(
 
 # ----------------------------------------
 # Log one vehicle entry attempt
+# Simplified: only log plate number (ABC123 format, no dash)
 # ----------------------------------------
 def log_entry(
     image_name,
     plate_number,
     confidence,
-    status,
-    owner="Unknown",
-    employee_id="Unknown",
-    department="Unknown",
-    vehicle_type="Unknown",
-    registration_year=""
+    status
 ):
 
     # ----------------------------------------
@@ -104,31 +100,21 @@ def log_entry(
                 "Time",
                 "Image",
                 "Plate_Number",
-                "Registration_Year",
                 "Confidence",
-                "Status",
-                "Owner",
-                "Employee_ID",
-                "Department",
-                "Vehicle_Type"
+                "Status"
             ])
 
 
         # ----------------------------------------
-        # Add vehicle entry
+        # Add vehicle entry (only plate_number in ABC123 format)
         # ----------------------------------------
         writer.writerow([
             date,
             time,
             image_name,
             plate_number,
-            registration_year,
             confidence,
-            status,
-            owner,
-            employee_id,
-            department,
-            vehicle_type
+            status
         ])
 
 

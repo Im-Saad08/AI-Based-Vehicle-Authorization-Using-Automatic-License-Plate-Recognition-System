@@ -41,6 +41,7 @@ from detect_and_crop_plate import detect_and_crop
 from recognize_plate import recognize_plate
 from authorize_vehicle import authorize_vehicle
 from logger import log_entry
+from normalize_plate import format_plate_display
 
 
 # ============================================================
@@ -602,7 +603,6 @@ def print_all_ocr_history():
 def finalize_vehicle(
     track_id,
     plate_yolo_confidence,
-    image_name,
     plate_image_name
 ):
 
@@ -677,24 +677,10 @@ def finalize_vehicle(
     )
 
     status = authorization["status"]
+    normalized_plate = authorization["normalized_plate"]
 
-    owner = authorization["owner"]
-
-    employee_id = authorization[
-        "employee_id"
-    ]
-
-    department = authorization[
-        "department"
-    ]
-
-    vehicle_type = authorization[
-        "vehicle_type"
-    ]
-
-    registration_year = authorization[
-        "registration_year"
-    ]
+    # Format for display as ABC-123
+    display_plate = format_plate_display(normalized_plate)
 
     # ========================================================
     # STATISTICS
@@ -716,12 +702,7 @@ def finalize_vehicle(
 
     print(
         f"Detected Plate       : "
-        f"{detected_plate}"
-    )
-
-    print(
-        f"Registration Year    : "
-        f"{registration_year}"
+        f"{display_plate}"
     )
 
     print(
@@ -741,26 +722,6 @@ def finalize_vehicle(
         f"{status.upper()}"
     )
 
-    print(
-        f"Owner                : "
-        f"{owner}"
-    )
-
-    print(
-        f"Employee ID          : "
-        f"{employee_id}"
-    )
-
-    print(
-        f"Department           : "
-        f"{department}"
-    )
-
-    print(
-        f"Vehicle Type         : "
-        f"{vehicle_type}"
-    )
-
     # ========================================================
     # LOG
     # ========================================================
@@ -769,21 +730,11 @@ def finalize_vehicle(
 
         image_name=plate_image_name,
 
-        plate_number=detected_plate,
-
-        registration_year=registration_year,
+        plate_number=normalized_plate,  # Log as ABC123 (no dash)
 
         confidence=ocr_confidence,
 
-        status=status,
-
-        owner=owner,
-
-        employee_id=employee_id,
-
-        department=department,
-
-        vehicle_type=vehicle_type
+        status=status
 
     )
 
@@ -838,7 +789,8 @@ def process_plate(
     # ========================================================
 
     ocr_result = recognize_plate(
-        plate_image
+        plate_image,
+        is_tall_plate=plate.get("is_tall_plate", False)
     )
 
     detected_plate = ocr_result[
@@ -892,35 +844,16 @@ def process_plate(
         )
 
         status = authorization["status"]
+        normalized_plate = authorization["normalized_plate"]
 
-        owner = authorization["owner"]
-
-        employee_id = authorization[
-            "employee_id"
-        ]
-
-        department = authorization[
-            "department"
-        ]
-
-        vehicle_type = authorization[
-            "vehicle_type"
-        ]
-
-        registration_year = authorization[
-            "registration_year"
-        ]
+        # Format for display as ABC-123
+        display_plate = format_plate_display(normalized_plate)
 
         print()
 
         print(
             f"Detected Plate       : "
-            f"{detected_plate}"
-        )
-
-        print(
-            f"Registration Year    : "
-            f"{registration_year}"
+            f"{display_plate}"
         )
 
         print(
@@ -940,45 +873,15 @@ def process_plate(
             f"{status.upper()}"
         )
 
-        print(
-            f"Owner                : "
-            f"{owner}"
-        )
-
-        print(
-            f"Employee ID          : "
-            f"{employee_id}"
-        )
-
-        print(
-            f"Department           : "
-            f"{department}"
-        )
-
-        print(
-            f"Vehicle Type         : "
-            f"{vehicle_type}"
-        )
-
         log_entry(
 
             image_name=plate_image_name,
 
-            plate_number=detected_plate,
-
-            registration_year=registration_year,
+            plate_number=normalized_plate,  # Log as ABC123 (no dash)
 
             confidence=ocr_confidence,
 
-            status=status,
-
-            owner=owner,
-
-            employee_id=employee_id,
-
-            department=department,
-
-            vehicle_type=vehicle_type
+            status=status
 
         )
 
@@ -1315,8 +1218,6 @@ def process_tracking_frame(
                         "yolo_confidence"
                     ]
                 ),
-
-                image_name=frame_name,
 
                 plate_image_name=(
                     last_plate[

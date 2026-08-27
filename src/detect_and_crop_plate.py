@@ -275,11 +275,17 @@ def detect_and_crop(
 
 
             # =================================================
-            # CROP PLATE WITH 10% MARGIN PADDING
+            # CROP PLATE WITH MARGIN PADDING
             # =================================================
+            # Use 40% vertical padding for all plates to ensure 2-line plates
+            # have enough height for OCR split logic. YOLO detections tend to
+            # be wider than the actual plate text area (aspect ratio ~0.48),
+            # so we need more vertical padding to reach aspect ratio > 0.7.
+            aspect_ratio = box_height / max(1, box_width)
+            is_tall_plate = aspect_ratio > 0.55
 
             pad_w = int(box_width * 0.10)
-            pad_h = int(box_height * 0.10)
+            pad_h = int(box_height * 0.40)  # Use 40% for all plates
 
             crop_x1 = max(0, x1 - pad_w)
             crop_y1 = max(0, y1 - pad_h)
@@ -412,7 +418,10 @@ def detect_and_crop(
                     x2,
                     y2
 
-                ]
+                ],
+
+                "is_tall_plate":
+                    is_tall_plate
 
             })
 

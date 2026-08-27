@@ -78,29 +78,16 @@ MIN_OCR_CONFIDENCE = 0.05
 # ============================================================
 
 CHAR_TO_DIGIT = {
-
-    "O": "0",
-    "Q": "0",
-    "D": "0",
-
-    "I": "1",
-    "L": "1",
-
+    "O": "0", "Q": "0", "D": "0",
+    "I": "1", "L": "1",
     "Z": "2",
-
     "S": "5",
-
     "G": "6",
-
     "T": "7",
-
     "B": "8"
-
 }
 
-
 DIGIT_TO_CHAR = {
-
     "0": "O",
     "1": "I",
     "2": "Z",
@@ -108,8 +95,29 @@ DIGIT_TO_CHAR = {
     "6": "G",
     "7": "T",
     "8": "B"
-
 }
+
+
+def fix_token_characters(token):
+    """Correct character confusion: if token starts with a digit or contains digits (e.g. 4OOB), convert letters to digits. Otherwise keep as letters."""
+    if not token:
+        return ""
+
+    digit_count = sum(1 for c in token if c.isdigit())
+    starts_with_digit = token[0].isdigit()
+
+    # If starts with a digit or contains numbers (e.g. 4OOB -> 4008)
+    if starts_with_digit or digit_count >= 1:
+        fixed = []
+        for c in token:
+            if c in CHAR_TO_DIGIT:
+                fixed.append(CHAR_TO_DIGIT[c])
+            else:
+                fixed.append(c)
+        return "".join(fixed)
+    else:
+        # Alpha token (e.g. MLE, MNA) - keep as letters
+        return token
 
 
 # ============================================================
@@ -125,34 +133,19 @@ def clean_plate_text(
         return ""
 
 
-    text = str(
+    raw_text = str(
         text
     ).upper().strip()
 
+    # Extract tokens from raw text FIRST (preserving word boundaries)
+    # This way "MLE 4008" -> ["MLE", "4008"] not ["MLE4008"]
+    tokens = re.findall(r"[A-Z0-9]+", raw_text)
 
-    text = text.replace(
-        " ",
-        ""
-    )
+    # Apply smart character correction per token (like normalize_plate.py)
+    corrected_tokens = [fix_token_characters(t) for t in tokens]
 
-
-    text = text.replace(
-        "-",
-        ""
-    )
-
-
-    text = text.replace(
-        "_",
-        ""
-    )
-
-
-    text = re.sub(
-        r"[^A-Z0-9]",
-        "",
-        text
-    )
+    # Join without separators
+    text = "".join(corrected_tokens)
 
 
     return text
@@ -165,82 +158,73 @@ def clean_plate_text(
 def generate_character_candidates(
     text
 ):
-
-    text = clean_plate_text(
-        text
-    )
-
-
+    """Generate candidate plate texts with different character interpretations.
+    Uses token-aware correction from the original raw text to avoid re-tokenizing
+    already-joined text (e.g., "MLE4008" being treated as one token)."""
     if not text:
-
         return []
 
+    # Extract tokens from RAW text FIRST (preserving word boundaries)
+    # This way "MLE 4008" -> ["MLE", "4008"] not ["MLE4008"]
+    raw_text = str(text).upper().strip()
+    raw_tokens = re.findall(r"[A-Z0-9]+", raw_text)
+
+    # Apply smart character correction per token (like normalize_plate.py)
+    corrected_tokens = [fix_token_characters(t) for t in raw_tokens]
+
+    # Base candidate: corrected tokens joined without separators
+    base_text = "".join(corrected_tokens)
+
+    if not base_text:
+        return []
 
     candidates = set()
 
+    # --------------------------------------------------------
+    # Original OCR result (already smart-corrected)
+    # --------------------------------------------------------
+    candidates.add(base_text)
 
     # --------------------------------------------------------
-    # Original OCR result
+    # Token-aware Letter <-> digit interpretation
+    # Apply maps per TOKEN (using raw_tokens), not per joined string
     # --------------------------------------------------------
 
-    candidates.add(
-        text
-    )
+    def apply_digit_map_per_token(tokens):
+        result = []
+        for token in tokens:
+            digit_count = sum(1 for c in token if c.isdigit())
+            starts_with_digit = token[0].isdigit() if token else False
+            if starts_with_digit or digit_count >= 1:
+                # Convert letters to digits
+                fixed = ''.join(CHAR_TO_DIGIT.get(c, c) for c in token)
+                result.append(fixed)
+            else:
+                # Keep as letters
+                result.append(token)
+        return ''.join(result)
 
+    def apply_letter_map_per_token(tokens):
+        result = []
+        for token in tokens:
+            digit_count = sum(1 for c in token if c.isdigit())
+            starts_with_digit = token[0].isdigit() if token else False
+            if not starts_with_digit and digit_count == 0:
+                # Pure alpha token - convert digits to letters
+                fixed = ''.join(DIGIT_TO_CHAR.get(c, c) for c in token)
+                result.append(fixed)
+            else:
+                # Already has digits - keep as is
+                result.append(token)
+        return ''.join(result)
 
-    # --------------------------------------------------------
-    # Letter -> digit interpretation
-    # --------------------------------------------------------
+    digit_version = apply_digit_map_per_token(corrected_tokens)
+    candidates.add(digit_version)
 
-    digit_version = ""
+    letter_version = apply_letter_map_per_token(corrected_tokens)
+    candidates.add(letter_version)
 
-
-    for char in text:
-
-        if char in CHAR_TO_DIGIT:
-
-            digit_version += (
-                CHAR_TO_DIGIT[char]
-            )
-
-        else:
-
-            digit_version += char
-
-
-    candidates.add(
-        digit_version
-    )
-
-
-    # --------------------------------------------------------
-    # Digit -> letter interpretation
-    # --------------------------------------------------------
-
-    letter_version = ""
-
-
-    for char in text:
-
-        if char in DIGIT_TO_CHAR:
-
-            letter_version += (
-                DIGIT_TO_CHAR[char]
-            )
-
-        else:
-
-            letter_version += char
-
-
-    candidates.add(
-        letter_version
-    )
-
-
-    return list(
-        candidates
-    )
+    return list(candidates)
 
 
 # ============================================================
@@ -250,11 +234,9 @@ def generate_character_candidates(
 def plate_format_score(
     text
 ):
-
-    text = clean_plate_text(
-        text
-    )
-
+    # text is ALREADY cleaned (from generate_character_candidates or select_best_interpretation).
+    # Do NOT re-apply clean_plate_text to avoid re-tokenizing and corrupting valid plates
+    # (e.g., "MLE4008" being treated as one token and L→1 converted).
 
     if not text:
 
@@ -396,58 +378,35 @@ def score_plate(
     plate_text,
     confidence
 ):
-
-    text = clean_plate_text(
-        plate_text
-    )
-
+    """
+    Score a plate candidate. Assumes plate_text is ALREADY CLEANED (e.g., from generate_character_candidates).
+    Does NOT re-apply clean_plate_text to avoid corrupting already-corrected tokens.
+    """
+    text = plate_text  # Already cleaned
 
     if not text:
-
         return -100
 
+    score = float(confidence) * 100
 
-    score = (
-        float(confidence) * 100
-    )
+    score += plate_format_score(text)
 
-
-    score += plate_format_score(
-        text
-    )
-
-
-    length = len(
-        text
-    )
-
+    length = len(text)
 
     if length < 3:
-
         score -= 80
 
-
     if length > 10:
-
         score -= 40
-
 
     if confidence < 0.05:
-
         score -= 70
-
     elif confidence < 0.10:
-
         score -= 40
-
     elif confidence < 0.20:
-
         score -= 15
-
     elif confidence >= 0.50:
-
         score += 20
-
 
     return score
 
@@ -588,17 +547,120 @@ def get_in_memory_ocr():
     return _IN_MEMORY_OCR if _IN_MEMORY_OCR is not False else None
 
 
+# Helper for when we don't want to split (e.g., recursive calls on halves)
+def _ocr_single_image_no_split(image):
+    temp_file = False
+    image_path = None
+
+    try:
+        # Prepare image
+        image_path, temp_file = save_image_for_ocr(image)
+
+        # Try Fast In-Memory PaddleOCR First
+        fast_ocr = get_in_memory_ocr()
+        if fast_ocr is not None:
+            ocr_res = fast_ocr.predict(image_path)
+            if ocr_res and len(ocr_res) > 0 and ocr_res[0]:
+                data = ocr_res[0]
+                texts = data.get("rec_texts", [])
+                scores = data.get("rec_scores", [])
+
+                combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
+                avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
+
+                if temp_file and os.path.exists(image_path):
+                    try:
+                        os.remove(image_path)
+                    except Exception:
+                        pass
+                return combined_text, avg_conf
+
+        # Fallback to Subprocess
+        if not os.path.exists(OCR_WORKER):
+            return "", 0.0
+
+        if not os.path.exists(OCR_PYTHON):
+            return "", 0.0
+
+        process = subprocess.run(
+            [OCR_PYTHON, "-u", OCR_WORKER, image_path],
+            capture_output=True,
+            text=True,
+            timeout=OCR_TIMEOUT,
+            cwd=PROJECT_ROOT
+        )
+
+        if process.returncode != 0:
+            return "", 0.0
+
+        output = process.stdout.strip()
+        if not output:
+            return "", 0.0
+
+        result = None
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            if not (line.startswith("[") or line.startswith("{")):
+                continue
+            try:
+                result = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+
+        if result is None:
+            return "", 0.0
+
+        if isinstance(result, list):
+            if not result:
+                return "", 0.0
+            first_result = result[0]
+        elif isinstance(result, dict):
+            first_result = result
+        else:
+            return "", 0.0
+
+        text = first_result.get("text", "")
+        confidence = first_result.get("confidence", 0.0)
+
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        text = clean_plate_text(text)
+
+        return text, confidence
+
+    except subprocess.TimeoutExpired:
+        return "", 0.0
+    except Exception as e:
+        print(f"\nPaddleOCR worker error: {e}")
+        return "", 0.0
+    finally:
+        if temp_file and image_path:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+
+
 def ocr_single_image(
-    image
+    image,
+    _depth=0,
+    is_tall_plate=False
 ):
 
     if image is None:
-
         return "", 0.0
 
+    # Prevent infinite recursion from split logic
+    if _depth > 1:
+        return _ocr_single_image_no_split(image)
 
     temp_file = False
-
     image_path = None
 
 
@@ -615,42 +677,42 @@ def ocr_single_image(
         )
 
         # ----------------------------------------------------
-        # Try Fast In-Memory PaddleOCR First
+        # SPLIT LOGIC FOR 2-LINE PLATES (runs for BOTH in-memory and subprocess paths)
+        # Use is_tall_plate flag from detection (based on raw YOLO box, threshold 0.55)
+        # instead of computing aspect ratio on padded crop (which overlaps single/2-line).
+        # Only split at _depth == 0 (top-level crop), not on recursive half-images.
+        # ----------------------------------------------------
+        if _depth == 0 and is_tall_plate:
+            h, w = image.shape[:2]
+            top_half = image[0:int(h * 0.55), :]
+            bottom_half = image[int(h * 0.40):h, :]
+
+            # Pass _depth+1 to prevent re-splitting on halves, pass is_tall_plate=False for halves
+            top_t, top_c = ocr_single_image(top_half, _depth + 1, is_tall_plate=False)
+            bot_t, bot_c = ocr_single_image(bottom_half, _depth + 1, is_tall_plate=False)
+
+            print(f"    [split] top='{top_t}' ({top_c:.2f})  bottom='{bot_t}' ({bot_c:.2f})")
+
+            if top_t or bot_t:
+                # Join with space to preserve token boundaries for character correction
+                combined_text = f"{top_t} {bot_t}".strip()
+                confs = [c for c in (top_c, bot_c) if c > 0]
+                avg_conf = float(sum(confs) / len(confs)) if confs else 0.0
+
+                if temp_file and os.path.exists(image_path):
+                    try:
+                        os.remove(image_path)
+                    except Exception:
+                        pass
+                return combined_text, avg_conf
+            # if neither half read anything, fall through to whole-crop below
+
+        # ----------------------------------------------------
+        # Try Fast In-Memory PaddleOCR First (whole-crop)
         # ----------------------------------------------------
 
         fast_ocr = get_in_memory_ocr()
         if fast_ocr is not None:
-            # Decide 2-line vs 1-line from the CROP'S SHAPE, not from what
-            # the first OCR pass happened to find. This runs BEFORE we
-            # trust any whole-crop result.
-            is_tall_plate = (
-                isinstance(image, np.ndarray)
-                and image.shape[0] / max(1, image.shape[1]) > 0.35
-            )
-
-            if is_tall_plate:
-                h, w = image.shape[:2]
-                top_half = image[0:int(h * 0.55), :]
-                bottom_half = image[int(h * 0.40):h, :]
-
-                top_t, top_c = ocr_single_image(top_half)
-                bot_t, bot_c = ocr_single_image(bottom_half)
-
-                print(f"    [split] top='{top_t}' ({top_c:.2f})  bottom='{bot_t}' ({bot_c:.2f})")
-
-                if top_t or bot_t:
-                    combined_text = f"{top_t}{bot_t}".strip()
-                    confs = [c for c in (top_c, bot_c) if c > 0]
-                    avg_conf = float(sum(confs) / len(confs)) if confs else 0.0
-
-                    if temp_file and os.path.exists(image_path):
-                        try:
-                            os.remove(image_path)
-                        except Exception:
-                            pass
-                    return combined_text, avg_conf
-                # if neither half read anything, fall through to whole-crop below
-
             ocr_res = fast_ocr.predict(image_path)
             if ocr_res and len(ocr_res) > 0 and ocr_res[0]:
                 data = ocr_res[0]
@@ -1051,7 +1113,8 @@ def select_best_interpretation(
 # ============================================================
 
 def recognize_plate(
-    plate_image
+    plate_image,
+    is_tall_plate=False
 ):
 
     # ========================================================
@@ -1072,7 +1135,8 @@ def recognize_plate(
 
     text, conf = ocr_single_image(
 
-        plate_image
+        plate_image,
+        is_tall_plate=is_tall_plate
 
     )
 
@@ -1137,7 +1201,8 @@ def recognize_plate(
 
         text, conf = ocr_single_image(
 
-            image
+            image,
+            is_tall_plate=is_tall_plate
 
         )
 
@@ -1241,25 +1306,16 @@ def recognize_plate(
     # ========================================================
     # FINAL CLEANING
     # ========================================================
-
-    final_text = clean_plate_text(
-
-        best["text"]
-
-    )
-
+    # best["text"] is already a cleaned candidate from generate_character_candidates.
+    # Do NOT re-apply clean_plate_text to avoid re-tokenizing and corrupting valid plates.
+    final_text = best["text"]
 
     final_confidence = (
-
         best["confidence"]
-
     )
 
-
     final_score = (
-
         best["score"]
-
     )
 
 

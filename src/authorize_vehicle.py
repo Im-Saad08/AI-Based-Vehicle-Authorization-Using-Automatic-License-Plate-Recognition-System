@@ -1,6 +1,5 @@
 import pandas as pd
 import os
-from normalize_plate import normalize_plate_text
 
 
 # ----------------------------------------
@@ -24,8 +23,11 @@ vehicles_data = pd.read_csv(
 
 
 # ----------------------------------------
-# Create normalized plate column
+# Create normalized plate column for database
+# (database plates are raw formats like "MN 4524", "Ka-09 Ma 2662")
 # ----------------------------------------
+
+from normalize_plate import normalize_plate_text
 
 vehicles_data["Normalized_Plate_Number"] = (
     vehicles_data["Plate_Number"]
@@ -44,47 +46,27 @@ vehicles_data["Normalized_Plate_Number"] = (
 def authorize_vehicle(
     plate_number
 ):
-
-    # ----------------------------------------
-    # Normalize OCR result
-    # ----------------------------------------
-
-    normalized_ocr = normalize_plate_text(
-        plate_number
-    )
-
-    normalized_plate = normalized_ocr[
-        "plate_number"
-    ]
-
-    ocr_registration_year = normalized_ocr[
-        "registration_year"
-    ]
-
+    """
+    plate_number is already normalized by recognize_plate (token-aware corrected, joined as ABC123).
+    Do NOT re-apply normalize_plate_text to avoid corrupting already-corrected plates
+    (e.g., "MLE4008" would become "M1E4008" if re-tokenized as single token).
+    """
     # ----------------------------------------
     # Empty OCR result
     # ----------------------------------------
 
-    if (
-        normalized_plate == ""
-        or normalized_plate.lower() == "nan"
-    ):
+    if not plate_number or plate_number.lower() == "nan":
 
         return {
 
             "status": "Unable to Read",
 
-            "owner": "Unknown",
-
-            "employee_id": "Unknown",
-
-            "department": "Unknown",
-
-            "vehicle_type": "Unknown",
-
-            "registration_year":
-                ocr_registration_year
+            "normalized_plate": ""
         }
+
+    # The plate_number from recognize_plate is already in normalized format (ABC123)
+    # Use it directly for database lookup
+    normalized_plate = plate_number
 
     # ----------------------------------------
     # Search authorized database
@@ -119,56 +101,11 @@ def authorize_vehicle(
 
     if not matched_vehicle.empty:
 
-        vehicle = matched_vehicle.iloc[0]
-
-        stored_registration_year = str(
-
-            vehicle.get(
-                "Registration_Year",
-                ""
-            )
-
-        ).strip()
-
-        if (
-
-            stored_registration_year == ""
-
-            or
-
-            stored_registration_year.lower()
-            == "nan"
-
-        ):
-
-            final_registration_year = (
-                ocr_registration_year
-            )
-
-        else:
-
-            final_registration_year = (
-                stored_registration_year
-            )
-
         return {
 
             "status": "Authorized",
 
-            "owner":
-                vehicle["Name"],
-
-            "employee_id":
-                vehicle["Employee_ID"],
-
-            "department":
-                vehicle["Department"],
-
-            "vehicle_type":
-                vehicle["Vehicle_Type"],
-
-            "registration_year":
-                final_registration_year
+            "normalized_plate": normalized_plate
         }
 
     # ----------------------------------------
@@ -179,14 +116,5 @@ def authorize_vehicle(
 
         "status": "Unauthorized",
 
-        "owner": "Unknown",
-
-        "employee_id": "Unknown",
-
-        "department": "Unknown",
-
-        "vehicle_type": "Unknown",
-
-        "registration_year":
-            ocr_registration_year
+        "normalized_plate": normalized_plate
     }

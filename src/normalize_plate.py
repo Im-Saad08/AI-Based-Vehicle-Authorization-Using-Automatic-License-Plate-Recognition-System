@@ -96,3 +96,20 @@ def normalize_plate_text(text):
         "plate_number": plate_number,
         "registration_year": registration_year
     }
+
+
+def format_plate_display(plate_number):
+    """Format plate number for display as ABC-123 (letters-numbers with dash)."""
+    if not plate_number:
+        return ""
+
+    # Find the boundary between letters and numbers
+    # Pakistani plates typically: 2-3 letters followed by 3-4 digits
+    match = re.match(r'^([A-Z]+)(\d+)$', plate_number)
+    if match:
+        letters = match.group(1)
+        numbers = match.group(2)
+        return f"{letters}-{numbers}"
+
+    # If no clear letter-number split, return as-is
+    return plate_number
