@@ -649,8 +649,7 @@ def _ocr_single_image_no_split(image):
 
 def ocr_single_image(
     image,
-    _depth=0,
-    is_tall_plate=False
+    _depth=0
 ):
 
     if image is None:
@@ -675,37 +674,6 @@ def ocr_single_image(
                 image
             )
         )
-
-        # ----------------------------------------------------
-        # SPLIT LOGIC FOR 2-LINE PLATES (runs for BOTH in-memory and subprocess paths)
-        # Use is_tall_plate flag from detection (based on raw YOLO box, threshold 0.55)
-        # instead of computing aspect ratio on padded crop (which overlaps single/2-line).
-        # Only split at _depth == 0 (top-level crop), not on recursive half-images.
-        # ----------------------------------------------------
-        if _depth == 0 and is_tall_plate:
-            h, w = image.shape[:2]
-            top_half = image[0:int(h * 0.55), :]
-            bottom_half = image[int(h * 0.40):h, :]
-
-            # Pass _depth+1 to prevent re-splitting on halves, pass is_tall_plate=False for halves
-            top_t, top_c = ocr_single_image(top_half, _depth + 1, is_tall_plate=False)
-            bot_t, bot_c = ocr_single_image(bottom_half, _depth + 1, is_tall_plate=False)
-
-            print(f"    [split] top='{top_t}' ({top_c:.2f})  bottom='{bot_t}' ({bot_c:.2f})")
-
-            if top_t or bot_t:
-                # Join with space to preserve token boundaries for character correction
-                combined_text = f"{top_t} {bot_t}".strip()
-                confs = [c for c in (top_c, bot_c) if c > 0]
-                avg_conf = float(sum(confs) / len(confs)) if confs else 0.0
-
-                if temp_file and os.path.exists(image_path):
-                    try:
-                        os.remove(image_path)
-                    except Exception:
-                        pass
-                return combined_text, avg_conf
-            # if neither half read anything, fall through to whole-crop below
 
         # ----------------------------------------------------
         # Try Fast In-Memory PaddleOCR First (whole-crop)
@@ -1113,8 +1081,7 @@ def select_best_interpretation(
 # ============================================================
 
 def recognize_plate(
-    plate_image,
-    is_tall_plate=False
+    plate_image
 ):
 
     # ========================================================
@@ -1130,14 +1097,11 @@ def recognize_plate(
 
 
     # ========================================================
-    # ORIGINAL IMAGE
+    # ORIGINAL IMAGE - WHOLE CROP
     # ========================================================
 
     text, conf = ocr_single_image(
-
-        plate_image,
-        is_tall_plate=is_tall_plate
-
+        plate_image
     )
 
 
@@ -1190,6 +1154,42 @@ def recognize_plate(
         enhanced_images = {}
 
     # ========================================================
+    # SPLIT CROP (TOP/BOTTOM HALVES MERGED)
+    # ========================================================
+    # Always try splitting - let the scoring function decide if
+    # the split result is better than the whole crop.
+
+    h, w = plate_image.shape[:2]
+    if h > 10 and w > 10:
+        top_half = plate_image[0:int(h * 0.55), :]
+        bottom_half = plate_image[int(h * 0.40):h, :]
+
+        split_text, split_conf = ocr_single_image(top_half)
+        split_bot_text, split_bot_conf = ocr_single_image(bottom_half)
+
+        if split_text or split_bot_text:
+            combined_text = f"{split_text} {split_bot_text}".strip()
+            split_confs = [c for c in (split_conf, split_bot_conf) if c > 0]
+            split_avg_conf = float(sum(split_confs) / len(split_confs)) if split_confs else 0.0
+
+            if combined_text:
+                corrected_text, corrected_score = select_best_interpretation(
+                    combined_text,
+                    split_avg_conf
+                )
+            else:
+                corrected_text = ""
+                corrected_score = -100
+
+            candidates.append({
+                "version": "Split",
+                "text": corrected_text,
+                "raw_text": combined_text,
+                "confidence": split_avg_conf,
+                "score": corrected_score
+            })
+
+    # ========================================================
     # ENHANCED IMAGES
     # ========================================================
 
@@ -1200,10 +1200,7 @@ def recognize_plate(
     ):
 
         text, conf = ocr_single_image(
-
-            image,
-            is_tall_plate=is_tall_plate
-
+            image
         )
 
 

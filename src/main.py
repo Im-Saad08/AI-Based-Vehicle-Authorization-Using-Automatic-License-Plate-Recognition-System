@@ -72,7 +72,7 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/DSC_1010.JPG"
+INPUT_PATH = "img/input/Cars"
 
 
 # ============================================================
@@ -789,8 +789,7 @@ def process_plate(
     # ========================================================
 
     ocr_result = recognize_plate(
-        plate_image,
-        is_tall_plate=plate.get("is_tall_plate", False)
+        plate_image
     )
 
     detected_plate = ocr_result[
