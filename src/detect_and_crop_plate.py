@@ -275,12 +275,20 @@ def detect_and_crop(
 
 
             # =================================================
-            # CROP PLATE
+            # CROP PLATE WITH 10% MARGIN PADDING
             # =================================================
 
+            pad_w = int(box_width * 0.10)
+            pad_h = int(box_height * 0.10)
+
+            crop_x1 = max(0, x1 - pad_w)
+            crop_y1 = max(0, y1 - pad_h)
+            crop_x2 = min(width, x2 + pad_w)
+            crop_y2 = min(height, y2 + pad_h)
+
             plate_crop = original_image[
-                y1:y2,
-                x1:x2
+                crop_y1:crop_y2,
+                crop_x1:crop_x2
             ].copy()
 
 

@@ -71,15 +71,18 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/car_1.jpg"
+INPUT_PATH = "img/input/Cars/DSC_1010.JPG"
 
 
 # ============================================================
-# VEHICLE MODEL
+# LICENSE PLATE MODEL
 # ============================================================
 
-VEHICLE_MODEL_PATH = (
-    "models/pre_trained/yolo11n.pt"
+MODEL_PATH = os.path.join(
+    PROJECT_ROOT,
+    "models",
+    "trained",
+    "rbflw_y8_best.pt"
 )
 
 
@@ -117,11 +120,11 @@ print(
 )
 
 print(
-    f"Vehicle model: {VEHICLE_MODEL_PATH}"
+    f"Plate model  : {MODEL_PATH}"
 )
 
 print(
-    f"Model exists : {os.path.exists(VEHICLE_MODEL_PATH)}"
+    f"Model exists : {os.path.exists(MODEL_PATH)}"
 )
 
 print(
@@ -153,24 +156,24 @@ if INPUT_MODE != "webcam":
 
 
 # ============================================================
-# LOAD VEHICLE MODEL
+# LOAD LICENSE PLATE MODEL
 # ============================================================
 
 print(
-    "\nLoading vehicle detection model..."
+    "\nLoading license plate detection model..."
 )
 
-vehicle_model = YOLO(
-    VEHICLE_MODEL_PATH
+plate_model = YOLO(
+    MODEL_PATH
 )
 
 print(
-    "Vehicle model loaded successfully."
+    "License plate model loaded successfully."
 )
 
 
 # ============================================================
-# VEHICLE MODEL INFORMATION
+# MODEL INFORMATION
 # ============================================================
 
 print(
@@ -179,7 +182,7 @@ print(
 )
 
 print(
-    "VEHICLE MODEL INFORMATION"
+    "LICENSE PLATE MODEL INFORMATION"
 )
 
 print(
@@ -187,11 +190,11 @@ print(
 )
 
 print(
-    f"Vehicle model: {VEHICLE_MODEL_PATH}"
+    f"Plate model  : {MODEL_PATH}"
 )
 
 print(
-    f"Vehicle classes: {vehicle_model.names}"
+    f"Model classes: {plate_model.names}"
 )
 
 print(
@@ -1093,10 +1096,10 @@ def process_tracking_frame(
     global plate_detection_count
 
     # ========================================================
-    # VEHICLE DETECTION + TRACKING
+    # DIRECT LICENSE PLATE DETECTION + TRACKING
     # ========================================================
 
-    results = vehicle_model.track(
+    results = plate_model.track(
 
         source=frame,
 
@@ -1104,9 +1107,7 @@ def process_tracking_frame(
 
         tracker="bytetrack.yaml",
 
-        classes=VEHICLE_CLASSES,
-
-        conf=VEHICLE_CONFIDENCE,
+        conf=0.4,
 
         verbose=False
 
@@ -1139,7 +1140,7 @@ def process_tracking_frame(
         if result.boxes.id is None:
 
             print(
-                f"Vehicle detected in "
+                f"Plate detected in "
                 f"{frame_name}, but no tracking ID."
             )
 
@@ -1152,7 +1153,7 @@ def process_tracking_frame(
         )
 
         # ====================================================
-        # EACH VEHICLE
+        # EACH DETECTED LICENSE PLATE
         # ====================================================
 
         for box, track_id_tensor in zip(
@@ -1177,7 +1178,7 @@ def process_tracking_frame(
             )
 
             print(
-                f"\nVehicle detected | "
+                f"\nPlate detected | "
                 f"Frame: {frame_name} | "
                 f"Track ID: {track_id}"
             )
@@ -1226,90 +1227,62 @@ def process_tracking_frame(
                 continue
 
             # =================================================
-            # MINIMUM VEHICLE SIZE (DISTANCE FILTER)
+            # MINIMUM PLATE SIZE (DISTANCE FILTER)
             # =================================================
 
-            vehicle_w = x2 - x1
-            vehicle_h = y2 - y1
+            plate_w = x2 - x1
+            plate_h = y2 - y1
 
-            if vehicle_w < 100 or vehicle_h < 60:
+            if plate_w < 50 or plate_h < 15:
                 print(
-                    f"Skipping vehicle Track ID {track_id}: "
-                    f"Vehicle box too small ({vehicle_w}x{vehicle_h}px). Vehicle is too far."
+                    f"Skipping plate Track ID {track_id}: "
+                    f"Plate box too small ({plate_w}x{plate_h}px). Vehicle is too far."
                 )
                 continue
 
             # =================================================
-            # VEHICLE CROP
+            # DIRECT PLATE CROP WITH 10% MARGIN PADDING
             # =================================================
 
-            vehicle_crop = frame[
-                y1:y2,
-                x1:x2
+            pad_w = int(plate_w * 0.10)
+            pad_h = int(plate_h * 0.10)
+
+            crop_x1 = max(0, x1 - pad_w)
+            crop_y1 = max(0, y1 - pad_h)
+            crop_x2 = min(width, x2 + pad_w)
+            crop_y2 = min(height, y2 + pad_h)
+
+            plate_crop = frame[
+                crop_y1:crop_y2,
+                crop_x1:crop_x2
             ].copy()
 
-            if vehicle_crop.size == 0:
+            if plate_crop.size == 0:
 
                 continue
 
+            plate_info = {
+                "crop": plate_crop,
+                "box": (x1, y1, x2, y2),
+                "yolo_confidence": 0.90,
+                "image_name": f"{frame_name}_plate_{track_id}.png"
+            }
+
+            plate_detection_count += 1
+
             # =================================================
-            # LICENSE PLATE DETECTION
+            # PROCESS PLATE DIRECTLY
             # =================================================
 
-            print(
-                f"Running license plate detector "
-                f"for Track ID {track_id}..."
+            process_plate(
+
+                plate_info,
+
+                frame_name,
+
+                track_id=track_id
+
             )
-
-            cropped_plates = detect_and_crop(
-
-                vehicle_crop,
-
-                save_output=False
-
-            )
-
-            # =================================================
-            # NO PLATE
-            # =================================================
-
-            if len(cropped_plates) == 0:
-
-                print(
-                    f"No license plate detected "
-                    f"for Track ID {track_id}."
-                )
-
-                continue
-
-            # =================================================
-            # PLATE COUNT
-            # =================================================
-
-            plate_detection_count += len(
-                cropped_plates
-            )
-
-            print(
-                f"License plates detected: "
-                f"{len(cropped_plates)}"
-            )
-
-            # =================================================
-            # PROCESS PLATES
-            # =================================================
-
-            for plate in cropped_plates:
-
-                process_plate(
-
-                    plate,
-
-                    frame_name,
-
-                    track_id=track_id
-
-                )
 
             # =================================================
             # TRY FINALIZATION
@@ -1331,7 +1304,7 @@ def process_tracking_frame(
             # FINALIZE
             # =================================================
 
-            last_plate = cropped_plates[-1]
+            last_plate = plate_info
 
             finalized = finalize_vehicle(
 

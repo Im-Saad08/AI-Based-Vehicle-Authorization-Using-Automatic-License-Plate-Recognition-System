@@ -3,6 +3,7 @@ import os
 import json
 import subprocess
 import tempfile
+import numpy as np
 
 from enhance_plate import enhance_plate
 
@@ -372,7 +373,7 @@ def plate_format_score(
 
     if letters > 0 and digits == 0:
 
-        score -= 45
+        score -= 0
 
 
     # ========================================================
@@ -381,7 +382,7 @@ def plate_format_score(
 
     if digits > 0 and letters == 0:
 
-        score -= 35
+        score -= 0
 
 
     return score
@@ -567,6 +568,26 @@ def save_image_for_ocr(
 #
 # ============================================================
 
+# ============================================================
+# IN-MEMORY PADDLEOCR ENGINE (HIGH SPEED)
+# ============================================================
+
+_IN_MEMORY_OCR = None
+
+def get_in_memory_ocr():
+    global _IN_MEMORY_OCR
+    if _IN_MEMORY_OCR is None:
+        try:
+            os.environ["FLAGS_enable_pir_api"] = "0"
+            from paddleocr import PaddleOCR
+            print("\nLoading PaddleOCR engine in-memory for high speed...")
+            _IN_MEMORY_OCR = PaddleOCR(lang="en", enable_mkldnn=False, show_log=False)
+            print("PaddleOCR loaded in-memory successfully!")
+        except Exception:
+            _IN_MEMORY_OCR = False
+    return _IN_MEMORY_OCR if _IN_MEMORY_OCR is not False else None
+
+
 def ocr_single_image(
     image
 ):
@@ -593,9 +614,52 @@ def ocr_single_image(
             )
         )
 
+        # ----------------------------------------------------
+        # Try Fast In-Memory PaddleOCR First
+        # ----------------------------------------------------
+
+        fast_ocr = get_in_memory_ocr()
+        if fast_ocr is not None:
+            ocr_res = fast_ocr.predict(image_path)
+            if ocr_res and len(ocr_res) > 0 and ocr_res[0]:
+                data = ocr_res[0]
+                texts = data.get("rec_texts", [])
+                scores = data.get("rec_scores", [])
+
+                # If tall 2-line crop has only 1 detected line, split top and bottom halves to read both
+                if len(texts) == 1 and isinstance(image, np.ndarray) and image.shape[0] / max(1, image.shape[1]) > 0.35:
+                    h, w = image.shape[:2]
+                    top_half = image[0:int(h * 0.55), :]
+                    bottom_half = image[int(h * 0.40):h, :]
+
+                    top_t, top_c = ocr_single_image(top_half)
+                    bot_t, bot_c = ocr_single_image(bottom_half)
+
+                    if top_t and bot_t and top_t != bot_t:
+                        combined_text = f"{top_t} {bot_t}"
+                        avg_conf = float((top_c + bot_c) / 2.0)
+                    elif bot_t and bot_t != texts[0]:
+                        combined_text = f"{texts[0]} {bot_t}"
+                        avg_conf = float((scores[0] + bot_c) / 2.0)
+                    elif top_t and top_t != texts[0]:
+                        combined_text = f"{top_t} {texts[0]}"
+                        avg_conf = float((top_c + scores[0]) / 2.0)
+                    else:
+                        combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
+                        avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
+                else:
+                    combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
+                    avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
+
+                if temp_file and os.path.exists(image_path):
+                    try:
+                        os.remove(image_path)
+                    except Exception:
+                        pass
+                return combined_text, avg_conf
 
         # ----------------------------------------------------
-        # Check OCR worker
+        # Fallback to Subprocess if not in-memory
         # ----------------------------------------------------
 
         if not os.path.exists(
@@ -1044,6 +1108,13 @@ def recognize_plate(
 
     })
 
+    # ========================================================
+    # EARLY EXIT (SKIP REDUNDANT ENHANCEMENT OCR PASSES)
+    # ========================================================
+
+    if text and conf >= 0.70 and corrected_text:
+        # High confidence reading on original image - skip 5 extra enhancement passes!
+        enhanced_images = {}
 
     # ========================================================
     # ENHANCED IMAGES
