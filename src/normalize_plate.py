@@ -1,9 +1,21 @@
 import re
 
+# Region/city/province words that appear on plates but are NOT part of the plate number
+# We filter out ANY token that CONTAINS these as substrings (not just exact match)
+# to catch joined OCR tokens like "ICTISLAMABAD", "ISLAHABAD", etc.
 REGION_WORDS = {
-    "PUNJAB", "ISLAMABAD", "ICT", "SINDH", "KPK", "BALOCHISTAN",
-    "FEDERAL", "GOVERNMENT", "PAKISTAN", "GOVT", "ISL", "KHYBER",
-    "PAKHTUNKHWA", "CCT", "ICTISLAMABAD"
+    # Provinces/territories
+    "PUNJAB", "SINDH", "KPK", "KHYBER", "PAKHTUNKHWA", "BALOCHISTAN", "BALUCHISTAN",
+    "ISLAMABAD", "ICT", "ISL", "CCT", "FEDERAL", "CAPITAL", "TERRITORY",
+    # Government plates
+    "GOVERNMENT", "GOVT", "GOVT OF", "PAKISTAN", "PAK", "FED",
+    # Cities/regions commonly printed on plates
+    "LAHORE", "KARACHI", "RAWALPINDI", "PESHAWAR", "QUETTA", "MULTAN", "FAISALABAD",
+    "GUJRANWALA", "HYDERABAD", "SARGODHA", "SUKKUR", "BAHAWALPUR", "JHELUM",
+    "GILGIT", "SKARDU", "MIRPUR", "MUZAFFARABAD",
+    # Common compound region labels seen on plates
+    "ICTISLAMABAD", "ISLAHABAD", "ISLAMABADICT", "PUNJABGOVT", "SINDHGOVT",
+    "KPKGOVT", "FEDERALGOVT", "KHYBERPAKHTUNKHWA", "KHYBERPAXHTUNIKHWA"
 }
 
 CHAR_TO_DIGIT = {
@@ -62,39 +74,27 @@ def normalize_plate_text(text):
     # Extract alphanumeric tokens
     raw_tokens = re.findall(r"[A-Z0-9]+", raw_text)
 
-    # Filter out region words
-    tokens = [t for t in raw_tokens if t not in REGION_WORDS]
+    # Filter out region words — match tokens that CONTAIN any region word as substring
+    # (not just exact match), to catch OCR-joined tokens like "ICTISLAMABAD"
+    def is_region_token(token):
+        for region_word in REGION_WORDS:
+            if region_word in token:
+                return True
+        return False
+
+    tokens = [t for t in raw_tokens if not is_region_token(t)]
 
     # Fix character confusion in tokens
     corrected_tokens = [fix_token_characters(t) for t in tokens]
 
-    # Identify numeric registration year candidates (2 digits)
-    year_candidates = [
-        t for t in corrected_tokens
-        if t.isdigit() and len(t) == 2
-    ]
-
-    # Identify main plate numbers (3+ digits)
-    main_number_candidates = [
-        t for t in corrected_tokens
-        if t.isdigit() and len(t) >= 3
-    ]
-
-    registration_year = ""
-    plate_tokens = corrected_tokens.copy()
-
-    # Extract 2-digit registration year if present alongside main number
-    if len(year_candidates) == 1 and len(main_number_candidates) >= 1:
-        registration_year = year_candidates[0]
-        plate_tokens.remove(registration_year)
-
     # Join into a single-line canonical plate string without spaces or dashes
-    plate_number = "".join(plate_tokens)
+    # All corrected tokens are merged in reading order (top-to-bottom, left-to-right)
+    # No special-casing for any 2-digit segment — they are part of the plate identity
+    plate_number = "".join(corrected_tokens)
 
     return {
         "raw_text": raw_text,
-        "plate_number": plate_number,
-        "registration_year": registration_year
+        "plate_number": plate_number
     }
 
 

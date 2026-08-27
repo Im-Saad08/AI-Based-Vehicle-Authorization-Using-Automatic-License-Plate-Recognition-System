@@ -1,17 +1,17 @@
-Employee_ID,Name,Department,Vehicle_Type,Plate_Number,Registration_Year,Status
-EMP001,Muhammad Saad,Computer Engineering,Car,MNA1554,,Authorized
-EMP002,Ali Hassan,Administration,Car,MN1367,,Authorized
-EMP003,Ayesha Khan,Human Resources,Car,LEA5770,,Authorized
-EMP004,Bilal Ahmed,Security,Bike,BRS1500,12,Authorized
-EMP005,Sara Ali,Finance,Car,LEH4455,17,Authorized
-EMP006,Hamza Raza,Research,Car,MN108,76,Authorized
-EMP007,Ahmed Khan,IT,Car,MN 4524,,Authorized
-EMP008,Fatima Noor,Library,Car,LRV8227,,Authorized
-EMP009,Usman Malik,Accounts,Bike,LE1051,15,Authorized
-EMP010,Zain Ali,Faculty,Car,MNB419,16,Authorized
-EMP011,Mustafa Khan,Computer Science,Car,RLG5,,Authorized
-EMP012,Shayan Ahmed,Accounts,Car,MNA2272,,Authorized
-EMP013,Saif Khan,HR,Car,Ka-09 Ma 2662,,Authorized
-EMP014,Asif Muneeb,Administration,Car,MNA5645,08,Authorized
-EMP015,Aasia Arif,Faculty,Car,FSA5750,,Authorized
-EMP016,Navid Aslam,Finance,Car,LEH5036,17,Authorized
+Employee_ID,Name,Department,Vehicle_Type,Plate_Number,Status
+EMP001,Muhammad Saad,Computer Engineering,Car,MNA1554,Authorized
+EMP002,Ali Hassan,Administration,Car,MN1367,Authorized
+EMP003,Ayesha Khan,Human Resources,Car,LEA5770,Authorized
+EMP004,Bilal Ahmed,Security,Bike,BRS1500,Authorized
+EMP005,Sara Ali,Finance,Car,LEH4455,Authorized
+EMP006,Hamza Raza,Research,Car,MN108,Authorized
+EMP007,Ahmed Khan,IT,Car,MN 4524,Authorized
+EMP008,Fatima Noor,Library,Car,LRV8227,Authorized
+EMP009,Usman Malik,Accounts,Bike,LE1051,Authorized
+EMP010,Zain Ali,Faculty,Car,MNB419,Authorized
+EMP011,Mustafa Khan,Computer Science,Car,RLG5,Authorized
+EMP012,Shayan Ahmed,Accounts,Car,MNA2272,Authorized
+EMP013,Saif Khan,HR,Car,Ka-09 Ma 2662,Authorized
+EMP014,Asif Muneeb,Administration,Car,MNA5645,Authorized
+EMP015,Aasia Arif,Faculty,Car,FSA5750,Authorized
+EMP016,Navid Aslam,Finance,Car,LEH5036,Authorized

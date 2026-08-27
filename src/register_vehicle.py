@@ -304,13 +304,6 @@ detected_plate = normalized_result[
     "plate_number"
 ]
 
-# Registration year
-detected_registration_year = (
-    normalized_result[
-        "registration_year"
-    ]
-)
-
 
 # ==================================================
 # SHOW DETECTED REGISTRATION INFORMATION
@@ -328,11 +321,6 @@ print(
 print(
     f"Plate Number           : "
     f"{detected_plate}"
-)
-
-print(
-    f"Registration Year      : "
-    f"{detected_registration_year}"
 )
 
 print(
@@ -359,11 +347,6 @@ print(
 )
 
 print(
-    f"Registration Year : "
-    f"{detected_registration_year}"
-)
-
-print(
     "\nPress ENTER to accept the detected plate."
 )
 
@@ -384,10 +367,6 @@ if corrected_plate == "":
 
     final_plate = detected_plate
 
-    final_registration_year = (
-        detected_registration_year
-    )
-
 
 # ------------------------------------------
 # Admin corrected OCR result
@@ -402,23 +381,6 @@ else:
     final_plate = corrected_result[
         "plate_number"
     ]
-
-    entered_year = input(
-        "\nRegistration Year "
-        "(Press ENTER to keep detected year): "
-    ).strip()
-
-    if entered_year == "":
-
-        final_registration_year = (
-            detected_registration_year
-        )
-
-    else:
-
-        final_registration_year = (
-            entered_year
-        )
 # ==================================================
 # CHECK FINAL PLATE
 # ==================================================
@@ -468,7 +430,6 @@ required_columns = [
     "Department",
     "Vehicle_Type",
     "Plate_Number",
-    "Registration_Year",
     "Status"
 ]
 
@@ -609,9 +570,6 @@ new_vehicle = pd.DataFrame([
         "Plate_Number":
             final_plate,
 
-        "Registration_Year":
-            final_registration_year,
-
         "Status":
             "Authorized"
 
@@ -634,7 +592,6 @@ new_columns = [
     "Department",
     "Vehicle_Type",
     "Plate_Number",
-    "Registration_Year",
     "Status"
 ]
 
@@ -688,11 +645,6 @@ print(
 print(
     f"Plate Number      : "
     f"{final_plate}"
-)
-
-print(
-    f"Registration Year : "
-    f"{final_registration_year}"
 )
 
 print(

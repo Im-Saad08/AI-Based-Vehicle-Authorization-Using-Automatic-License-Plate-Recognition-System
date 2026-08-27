@@ -25,8 +25,3 @@ for text in test_cases:
         "Plate Number:",
         result["plate_number"]
     )
-
-    print(
-        "Registration Year:",
-        result["registration_year"]
-    )
