@@ -620,36 +620,45 @@ def ocr_single_image(
 
         fast_ocr = get_in_memory_ocr()
         if fast_ocr is not None:
+            # Decide 2-line vs 1-line from the CROP'S SHAPE, not from what
+            # the first OCR pass happened to find. This runs BEFORE we
+            # trust any whole-crop result.
+            is_tall_plate = (
+                isinstance(image, np.ndarray)
+                and image.shape[0] / max(1, image.shape[1]) > 0.35
+            )
+
+            if is_tall_plate:
+                h, w = image.shape[:2]
+                top_half = image[0:int(h * 0.55), :]
+                bottom_half = image[int(h * 0.40):h, :]
+
+                top_t, top_c = ocr_single_image(top_half)
+                bot_t, bot_c = ocr_single_image(bottom_half)
+
+                print(f"    [split] top='{top_t}' ({top_c:.2f})  bottom='{bot_t}' ({bot_c:.2f})")
+
+                if top_t or bot_t:
+                    combined_text = f"{top_t}{bot_t}".strip()
+                    confs = [c for c in (top_c, bot_c) if c > 0]
+                    avg_conf = float(sum(confs) / len(confs)) if confs else 0.0
+
+                    if temp_file and os.path.exists(image_path):
+                        try:
+                            os.remove(image_path)
+                        except Exception:
+                            pass
+                    return combined_text, avg_conf
+                # if neither half read anything, fall through to whole-crop below
+
             ocr_res = fast_ocr.predict(image_path)
             if ocr_res and len(ocr_res) > 0 and ocr_res[0]:
                 data = ocr_res[0]
                 texts = data.get("rec_texts", [])
                 scores = data.get("rec_scores", [])
 
-                # If tall 2-line crop has only 1 detected line, split top and bottom halves to read both
-                if len(texts) == 1 and isinstance(image, np.ndarray) and image.shape[0] / max(1, image.shape[1]) > 0.35:
-                    h, w = image.shape[:2]
-                    top_half = image[0:int(h * 0.55), :]
-                    bottom_half = image[int(h * 0.40):h, :]
-
-                    top_t, top_c = ocr_single_image(top_half)
-                    bot_t, bot_c = ocr_single_image(bottom_half)
-
-                    if top_t and bot_t and top_t != bot_t:
-                        combined_text = f"{top_t} {bot_t}"
-                        avg_conf = float((top_c + bot_c) / 2.0)
-                    elif bot_t and bot_t != texts[0]:
-                        combined_text = f"{texts[0]} {bot_t}"
-                        avg_conf = float((scores[0] + bot_c) / 2.0)
-                    elif top_t and top_t != texts[0]:
-                        combined_text = f"{top_t} {texts[0]}"
-                        avg_conf = float((top_c + scores[0]) / 2.0)
-                    else:
-                        combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
-                        avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
-                else:
-                    combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
-                    avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
+                combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
+                avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
 
                 if temp_file and os.path.exists(image_path):
                     try:
