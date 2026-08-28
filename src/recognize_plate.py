@@ -72,6 +72,24 @@ OCR_TIMEOUT = 120
 
 MIN_OCR_CONFIDENCE = 0.05
 
+# Early-exit threshold for the recognition-only OCR method.
+#
+# Under recognition-only OCR (no text detection), the whole-crop read is often
+# a weak/degenerate read of a multi-line plate (e.g. DSC_1010 whole-crop "ML" @
+# 0.35), so the OLD 0.70 gate calibrated for the full pipeline essentially never
+# fires and all 5 enhancement passes always run.
+#
+# Across the real test set the genuinely-good reads land at:
+#   whole-crop good  -> 0.86 (ACZ853, FZ886)
+#   split (two-line) -> 0.98-1.00 (LED135620, LEH56314, MLE4008)
+# while the noise floor (single chars / partial reads) sits at 0.17-0.49.
+#
+# 0.50 reliably fires on every good read while staying above the noise floor.
+# We ALSO require len(plate) >= 3 so a lone high-confidence single char (e.g.
+# "1" @ 0.64) can never trigger early-exit and mask a potentially-useful
+# enhancement pass.
+EARLY_EXIT_CONFIDENCE = 0.50
+
 
 # ============================================================
 # OCR CHARACTER CORRECTION
@@ -805,14 +823,6 @@ def recognize_plate(
     })
 
     # ========================================================
-    # EARLY EXIT (SKIP REDUNDANT ENHANCEMENT OCR PASSES)
-    # ========================================================
-
-    if text and conf >= 0.70 and corrected_text:
-        # High confidence reading on original image - skip 5 extra enhancement passes!
-        enhanced_images = {}
-
-    # ========================================================
     # SPLIT CROP (TOP/BOTTOM HALVES MERGED)
     # ========================================================
     # Always try splitting - let the scoring function decide if
@@ -847,6 +857,29 @@ def recognize_plate(
                 "confidence": split_avg_conf,
                 "score": corrected_score
             })
+
+    # ========================================================
+    # EARLY EXIT (SKIP REDUNDANT ENHANCEMENT OCR PASSES)
+    # ========================================================
+    # Gate on the BEST confidence across all candidates collected so far
+    # (Original whole-crop + Split halves), calibrated for the recognition-only
+    # confidence distribution (see EARLY_EXIT_CONFIDENCE). As soon as any
+    # candidate is a confident, sufficiently-long read, skip the 5 enhancement
+    # passes. Requiring len >= 3 avoids a lone high-conf single char
+    # (e.g. "1" @ 0.64) triggering the exit and hiding a better enhancement.
+    best_so_far = max(
+        candidates,
+        key=lambda x: x["confidence"]
+    )
+    if (best_so_far["confidence"] >= EARLY_EXIT_CONFIDENCE
+            and len(best_so_far["text"]) >= 3):
+        print(
+            f"\nEarly-exit: '{best_so_far['text']}' @ "
+            f"{best_so_far['confidence']:.2f} "
+            f"({best_so_far['version']}) >= {EARLY_EXIT_CONFIDENCE:.2f} "
+            f"- skipping enhancement passes."
+        )
+        enhanced_images = {}
 
     # ========================================================
     # ENHANCED IMAGES
