@@ -487,6 +487,82 @@ def get_in_memory_ocr():
     return _IN_MEMORY_OCR if _IN_MEMORY_OCR is not False else None
 
 
+# ============================================================
+# RECOGNITION-ONLY ENGINE (SPEED FIX)
+# ============================================================
+# The YOLO detector has ALREADY precisely located and cropped the plate.
+# Calling the full PaddleOCR pipeline (text detection + orientation
+# classification + recognition) on that crop re-runs text detection on a
+# region we already know contains exactly one line of text. That redundant
+# detection step is the dominant cost (~90s per image on CPU).
+#
+# PaddleOCR 3.x exposes a recognition-only class (TextRecognition) that
+# skips detection/orientation entirely and just recognizes characters in the
+# image. We use it for both the whole-crop and the split-half passes.
+# ============================================================
+
+_RECOG_ONLY_OCR = None
+
+def get_recognition_only_ocr():
+    global _RECOG_ONLY_OCR
+    if _RECOG_ONLY_OCR is None:
+        try:
+            os.environ["FLAGS_enable_pir_api"] = "0"
+            from paddleocr import TextRecognition
+            print(
+                "\nLoading recognition-only engine "
+                "(TextRecognition) for speed..."
+            )
+            _RECOG_ONLY_OCR = TextRecognition()
+            print("Recognition-only engine loaded successfully!")
+        except Exception:
+            _RECOG_ONLY_OCR = False
+    return _RECOG_ONLY_OCR if _RECOG_ONLY_OCR is not False else None
+
+
+def _run_ocr_on_image(image_path):
+    """Run recognition-only OCR on an already-cropped plate image.
+
+    Returns (combined_text, avg_confidence).
+    Falls back to the full PaddleOCR pipeline if the recognition-only
+    engine is unavailable.
+    """
+    # Primary: recognition-only engine (no redundant text detection)
+    recog = get_recognition_only_ocr()
+    if recog is not None:
+        res = recog.predict(image_path)
+        if res:
+            data = res[0] if isinstance(res, list) else res
+            if isinstance(data, dict):
+                # TextRecognition returns singular keys
+                text = data.get("rec_text", "")
+                score = data.get("rec_score", 0.0)
+                if text:
+                    return str(text).strip(), float(score)
+                return "", 0.0
+
+    # Fallback: full PaddleOCR pipeline
+    fast_ocr = get_in_memory_ocr()
+    if fast_ocr is not None:
+        ocr_res = fast_ocr.predict(image_path)
+        if ocr_res and len(ocr_res) > 0 and ocr_res[0]:
+            data = ocr_res[0]
+            texts = data.get("rec_texts", [])
+            scores = data.get("rec_scores", [])
+
+            combined_text = " ".join(
+                [str(t).strip() for t in texts if str(t).strip()]
+            )
+            avg_conf = (
+                float(sum(scores) / len(scores))
+                if len(scores) > 0
+                else 0.0
+            )
+            return combined_text, avg_conf
+
+    return "", 0.0
+
+
 # Helper for when we don't want to split (e.g., recursive calls on halves)
 def _ocr_single_image_no_split(image):
     temp_file = False
@@ -496,83 +572,10 @@ def _ocr_single_image_no_split(image):
         # Prepare image
         image_path, temp_file = save_image_for_ocr(image)
 
-        # Try Fast In-Memory PaddleOCR First
-        fast_ocr = get_in_memory_ocr()
-        if fast_ocr is not None:
-            ocr_res = fast_ocr.predict(image_path)
-            if ocr_res and len(ocr_res) > 0 and ocr_res[0]:
-                data = ocr_res[0]
-                texts = data.get("rec_texts", [])
-                scores = data.get("rec_scores", [])
+        # Recognition-only OCR (skips redundant text detection)
+        combined_text, avg_conf = _run_ocr_on_image(image_path)
 
-                combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
-                avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
-
-                if temp_file and os.path.exists(image_path):
-                    try:
-                        os.remove(image_path)
-                    except Exception:
-                        pass
-                return combined_text, avg_conf
-
-        # Fallback to Subprocess
-        if not os.path.exists(OCR_WORKER):
-            return "", 0.0
-
-        if not os.path.exists(OCR_PYTHON):
-            return "", 0.0
-
-        process = subprocess.run(
-            [OCR_PYTHON, "-u", OCR_WORKER, image_path],
-            capture_output=True,
-            text=True,
-            timeout=OCR_TIMEOUT,
-            cwd=PROJECT_ROOT
-        )
-
-        if process.returncode != 0:
-            return "", 0.0
-
-        output = process.stdout.strip()
-        if not output:
-            return "", 0.0
-
-        result = None
-        for line in reversed(output.splitlines()):
-            line = line.strip()
-            if not line:
-                continue
-            if not (line.startswith("[") or line.startswith("{")):
-                continue
-            try:
-                result = json.loads(line)
-                break
-            except json.JSONDecodeError:
-                continue
-
-        if result is None:
-            return "", 0.0
-
-        if isinstance(result, list):
-            if not result:
-                return "", 0.0
-            first_result = result[0]
-        elif isinstance(result, dict):
-            first_result = result
-        else:
-            return "", 0.0
-
-        text = first_result.get("text", "")
-        confidence = first_result.get("confidence", 0.0)
-
-        try:
-            confidence = float(confidence)
-        except (TypeError, ValueError):
-            confidence = 0.0
-
-        text = clean_plate_text(text)
-
-        return text, confidence
+        return combined_text, avg_conf
 
     except subprocess.TimeoutExpired:
         return "", 0.0
@@ -616,299 +619,15 @@ def ocr_single_image(
         )
 
         # ----------------------------------------------------
-        # Try Fast In-Memory PaddleOCR First (whole-crop)
+        # Recognition-only OCR on the whole crop
+        # (skips redundant text detection on an already-cropped plate)
         # ----------------------------------------------------
 
-        fast_ocr = get_in_memory_ocr()
-        if fast_ocr is not None:
-            ocr_res = fast_ocr.predict(image_path)
-            if ocr_res and len(ocr_res) > 0 and ocr_res[0]:
-                data = ocr_res[0]
-                texts = data.get("rec_texts", [])
-                scores = data.get("rec_scores", [])
-
-                combined_text = " ".join([str(t).strip() for t in texts if str(t).strip()])
-                avg_conf = float(sum(scores) / len(scores)) if len(scores) > 0 else 0.0
-
-                if temp_file and os.path.exists(image_path):
-                    try:
-                        os.remove(image_path)
-                    except Exception:
-                        pass
-                return combined_text, avg_conf
-
-        # ----------------------------------------------------
-        # Fallback to Subprocess if not in-memory
-        # ----------------------------------------------------
-
-        if not os.path.exists(
-            OCR_WORKER
-        ):
-
-            print(
-                "\nPaddleOCR worker error:"
-            )
-
-            print(
-                f"ocr_worker.py not found:\n"
-                f"{OCR_WORKER}"
-            )
-
-            return "", 0.0
-
-
-        # ----------------------------------------------------
-        # Check Python 3.12 environment
-        # ----------------------------------------------------
-
-        if not os.path.exists(
-            OCR_PYTHON
-        ):
-
-            print(
-                "\nPaddleOCR worker error:"
-            )
-
-            print(
-                "Python 3.12 environment not found:"
-            )
-
-            print(
-                OCR_PYTHON
-            )
-
-            return "", 0.0
-
-
-        # ----------------------------------------------------
-        # Launch OCR worker
-        # ----------------------------------------------------
-
-        process = subprocess.run(
-
-            [
-
-                OCR_PYTHON,
-
-                "-u",
-
-                OCR_WORKER,
-
-                image_path
-
-            ],
-
-            capture_output=True,
-
-            text=True,
-
-            timeout=OCR_TIMEOUT,
-
-            cwd=PROJECT_ROOT
-
+        combined_text, avg_conf = _run_ocr_on_image(
+            image_path
         )
 
-
-        # ----------------------------------------------------
-        # Worker failed
-        # ----------------------------------------------------
-
-        if process.returncode != 0:
-
-            print(
-                "\nPaddleOCR worker failed."
-            )
-
-
-            if process.stdout:
-
-                print(
-                    "\nWorker stdout:"
-                )
-
-                print(
-                    process.stdout
-                )
-
-
-            if process.stderr:
-
-                print(
-                    "\nWorker stderr:"
-                )
-
-                print(
-                    process.stderr
-                )
-
-
-            return "", 0.0
-
-
-        # ----------------------------------------------------
-        # Get worker output
-        # ----------------------------------------------------
-
-        output = (
-            process.stdout.strip()
-        )
-
-
-        if not output:
-
-            print(
-                "\nPaddleOCR worker returned no output."
-            )
-
-            return "", 0.0
-
-
-        # ----------------------------------------------------
-        # Find JSON result
-        # ----------------------------------------------------
-        #
-        # PaddleOCR may produce logs such as:
-        #
-        # Creating model...
-        # Model files already exist...
-        #
-        # We therefore search from the bottom for the JSON
-        # result produced by ocr_worker.py.
-        #
-        # ----------------------------------------------------
-
-        result = None
-
-
-        for line in reversed(
-            output.splitlines()
-        ):
-
-            line = line.strip()
-
-
-            if not line:
-
-                continue
-
-
-            if not (
-                line.startswith("[")
-                or
-                line.startswith("{")
-            ):
-
-                continue
-
-
-            try:
-
-                result = json.loads(
-                    line
-                )
-
-                break
-
-
-            except json.JSONDecodeError:
-
-                continue
-
-
-        # ----------------------------------------------------
-        # JSON not found
-        # ----------------------------------------------------
-
-        if result is None:
-
-            print(
-                "\nCould not parse OCR worker output."
-            )
-
-            print(
-                "\nWorker output:"
-            )
-
-            print(
-                output
-            )
-
-            return "", 0.0
-
-
-        # ----------------------------------------------------
-        # Extract first OCR result
-        # ----------------------------------------------------
-
-        if isinstance(
-            result,
-            list
-        ):
-
-            if not result:
-
-                return "", 0.0
-
-
-            first_result = result[0]
-
-
-        elif isinstance(
-            result,
-            dict
-        ):
-
-            first_result = result
-
-
-        else:
-
-            return "", 0.0
-
-
-        # ----------------------------------------------------
-        # Text
-        # ----------------------------------------------------
-
-        text = first_result.get(
-            "text",
-            ""
-        )
-
-
-        # ----------------------------------------------------
-        # Confidence
-        # ----------------------------------------------------
-
-        confidence = first_result.get(
-            "confidence",
-            0.0
-        )
-
-
-        try:
-
-            confidence = float(
-                confidence
-            )
-
-        except (
-            TypeError,
-            ValueError
-        ):
-
-            confidence = 0.0
-
-
-        text = clean_plate_text(
-            text
-        )
-
-
-        return (
-            text,
-            confidence
-        )
+        return combined_text, avg_conf
 
 
     except subprocess.TimeoutExpired:
