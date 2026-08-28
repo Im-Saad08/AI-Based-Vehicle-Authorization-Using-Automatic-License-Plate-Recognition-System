@@ -72,7 +72,7 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/DSC_1060.JPG"
+INPUT_PATH = "img/input/Cars/DSC_0969.JPG"
 
 
 # ============================================================
@@ -959,7 +959,9 @@ def process_image(
 
         image,
 
-        save_output=True
+        save_output=True,
+
+        image_name=image_name
 
     )
 

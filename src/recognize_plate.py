@@ -867,12 +867,35 @@ def recognize_plate(
     # candidate is a confident, sufficiently-long read, skip the 5 enhancement
     # passes. Requiring len >= 3 avoids a lone high-conf single char
     # (e.g. "1" @ 0.64) triggering the exit and hiding a better enhancement.
+    # ALSO require a reasonable plate format (letters followed by digits)
+    # to avoid garbage like "AA7800AAZ80" from split crops on two-line plates
+    # triggering early-exit.
+    import re
+    def looks_like_plate(text):
+        # Pakistani plates: letters followed by digits (e.g., AAZ800, LE151051)
+        # Allow some flexibility but reject obviously garbled text
+        if not text or len(text) < 3:
+            return False
+        # Must have at least one letter AND one digit
+        has_letter = any(c.isalpha() for c in text)
+        has_digit = any(c.isdigit() for c in text)
+        if not (has_letter and has_digit):
+            return False
+        # Must match basic pattern: some letters, then some digits (allow some mixing)
+        # Reject patterns with multiple letter-digit transitions (garbage)
+        transitions = sum(1 for i in range(1, len(text))
+                         if text[i-1].isalpha() != text[i].isdigit())
+        # Valid plate: 0 or 1 transition (all letters -> all digits)
+        # Garbage: 2+ transitions (e.g., AA7800AAZ80 has transitions: A->7, 0->A, Z->8)
+        return transitions <= 1
+
     best_so_far = max(
         candidates,
         key=lambda x: x["confidence"]
     )
     if (best_so_far["confidence"] >= EARLY_EXIT_CONFIDENCE
-            and len(best_so_far["text"]) >= 3):
+            and len(best_so_far["text"]) >= 3
+            and looks_like_plate(best_so_far["text"])):
         print(
             f"\nEarly-exit: '{best_so_far['text']}' @ "
             f"{best_so_far['confidence']:.2f} "
