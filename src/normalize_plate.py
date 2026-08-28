@@ -38,31 +38,91 @@ DIGIT_TO_CHAR = {
 
 
 def fix_token_characters(token):
-    """Correct character confusion: if token starts with a digit or contains digits (e.g. 4OOB), convert letters to digits."""
+    """Correct character confusion with position-aware logic.
+
+    For Pakistani plates (typically LETTERS + NUMBERS format like ACZ853, LE151051, FZ886):
+    - Find the boundary between letters and digits
+    - Only convert letters to digits in the DIGIT segment (right side)
+    - Keep letters as letters in the LETTER segment (left side)
+    """
     if not token:
         return ""
 
-    digit_count = sum(1 for c in token if c.isdigit())
-    starts_with_digit = token[0].isdigit()
+    # Check if token contains both letters and digits (mixed alphanumeric)
+    has_letters = any(c.isalpha() for c in token)
+    has_digits = any(c.isdigit() for c in token)
 
-    # If starts with a digit or contains numbers (e.g. 4OOB -> 4008)
-    if starts_with_digit or digit_count >= 1:
-        fixed = []
-        for c in token:
-            if c in CHAR_TO_DIGIT:
-                fixed.append(CHAR_TO_DIGIT[c])
-            else:
-                fixed.append(c)
-        return "".join(fixed)
-    else:
-        # Alpha token (e.g. MLE, MNA)
-        fixed = []
-        for c in token:
+    # Pure alpha or pure digit token - use original logic
+    if not (has_letters and has_digits):
+        digit_count = sum(1 for c in token if c.isdigit())
+        starts_with_digit = token[0].isdigit()
+
+        if starts_with_digit or digit_count >= 1:
+            # Pure digit or starts with digit -> convert letters to digits
+            fixed = []
+            for c in token:
+                if c in CHAR_TO_DIGIT:
+                    fixed.append(CHAR_TO_DIGIT[c])
+                else:
+                    fixed.append(c)
+            return "".join(fixed)
+        else:
+            # Pure alpha -> convert digits to letters
+            fixed = []
+            for c in token:
+                if c in DIGIT_TO_CHAR:
+                    fixed.append(DIGIT_TO_CHAR[c])
+                else:
+                    fixed.append(c)
+            return "".join(fixed)
+
+    # Mixed alphanumeric token - position-aware correction
+    # Find the letter-to-digit transition boundary
+    # Pakistani plates: LETTERS followed by DIGITS
+    boundary_idx = None
+    for i in range(1, len(token)):
+        if token[i-1].isalpha() and token[i].isdigit():
+            boundary_idx = i
+            break
+
+    # If no clear boundary found, fall back to original logic
+    if boundary_idx is None:
+        # Try: starts with digit -> all to digits
+        if token[0].isdigit():
+            fixed = []
+            for c in token:
+                if c in CHAR_TO_DIGIT:
+                    fixed.append(CHAR_TO_DIGIT[c])
+                else:
+                    fixed.append(c)
+            return "".join(fixed)
+        else:
+            # Starts with letter -> keep as letters
+            fixed = []
+            for c in token:
+                if c in DIGIT_TO_CHAR:
+                    fixed.append(DIGIT_TO_CHAR[c])
+                else:
+                    fixed.append(c)
+            return "".join(fixed)
+
+    # Apply position-aware correction
+    fixed = []
+    for i, c in enumerate(token):
+        if i < boundary_idx:
+            # LETTER segment: keep letters, convert any misread digits to letters
             if c in DIGIT_TO_CHAR:
                 fixed.append(DIGIT_TO_CHAR[c])
             else:
                 fixed.append(c)
-        return "".join(fixed)
+        else:
+            # DIGIT segment: keep digits, convert any misread letters to digits
+            if c in CHAR_TO_DIGIT:
+                fixed.append(CHAR_TO_DIGIT[c])
+            else:
+                fixed.append(c)
+
+    return "".join(fixed)
 
 
 def normalize_plate_text(text):

@@ -76,48 +76,13 @@ MIN_OCR_CONFIDENCE = 0.05
 # ============================================================
 # OCR CHARACTER CORRECTION
 # ============================================================
+# Import from normalize_plate to ensure single source of truth
 
-CHAR_TO_DIGIT = {
-    "O": "0", "Q": "0", "D": "0",
-    "I": "1", "L": "1",
-    "Z": "2",
-    "S": "5",
-    "G": "6",
-    "T": "7",
-    "B": "8"
-}
-
-DIGIT_TO_CHAR = {
-    "0": "O",
-    "1": "I",
-    "2": "Z",
-    "5": "S",
-    "6": "G",
-    "7": "T",
-    "8": "B"
-}
-
-
-def fix_token_characters(token):
-    """Correct character confusion: if token starts with a digit or contains digits (e.g. 4OOB), convert letters to digits. Otherwise keep as letters."""
-    if not token:
-        return ""
-
-    digit_count = sum(1 for c in token if c.isdigit())
-    starts_with_digit = token[0].isdigit()
-
-    # If starts with a digit or contains numbers (e.g. 4OOB -> 4008)
-    if starts_with_digit or digit_count >= 1:
-        fixed = []
-        for c in token:
-            if c in CHAR_TO_DIGIT:
-                fixed.append(CHAR_TO_DIGIT[c])
-            else:
-                fixed.append(c)
-        return "".join(fixed)
-    else:
-        # Alpha token (e.g. MLE, MNA) - keep as letters
-        return token
+from normalize_plate import (
+    CHAR_TO_DIGIT,
+    DIGIT_TO_CHAR,
+    fix_token_characters
+)
 
 
 # ============================================================
@@ -173,58 +138,15 @@ def generate_character_candidates(
     corrected_tokens = [fix_token_characters(t) for t in raw_tokens]
 
     # Base candidate: corrected tokens joined without separators
+    # Already uses position-aware fix_token_characters from normalize_plate.py
+    # No additional candidate generation needed - old logic was harmful
     base_text = "".join(corrected_tokens)
 
     if not base_text:
         return []
 
-    candidates = set()
-
-    # --------------------------------------------------------
-    # Original OCR result (already smart-corrected)
-    # --------------------------------------------------------
-    candidates.add(base_text)
-
-    # --------------------------------------------------------
-    # Token-aware Letter <-> digit interpretation
-    # Apply maps per TOKEN (using raw_tokens), not per joined string
-    # --------------------------------------------------------
-
-    def apply_digit_map_per_token(tokens):
-        result = []
-        for token in tokens:
-            digit_count = sum(1 for c in token if c.isdigit())
-            starts_with_digit = token[0].isdigit() if token else False
-            if starts_with_digit or digit_count >= 1:
-                # Convert letters to digits
-                fixed = ''.join(CHAR_TO_DIGIT.get(c, c) for c in token)
-                result.append(fixed)
-            else:
-                # Keep as letters
-                result.append(token)
-        return ''.join(result)
-
-    def apply_letter_map_per_token(tokens):
-        result = []
-        for token in tokens:
-            digit_count = sum(1 for c in token if c.isdigit())
-            starts_with_digit = token[0].isdigit() if token else False
-            if not starts_with_digit and digit_count == 0:
-                # Pure alpha token - convert digits to letters
-                fixed = ''.join(DIGIT_TO_CHAR.get(c, c) for c in token)
-                result.append(fixed)
-            else:
-                # Already has digits - keep as is
-                result.append(token)
-        return ''.join(result)
-
-    digit_version = apply_digit_map_per_token(corrected_tokens)
-    candidates.add(digit_version)
-
-    letter_version = apply_letter_map_per_token(corrected_tokens)
-    candidates.add(letter_version)
-
-    return list(candidates)
+    # Return only the position-aware corrected candidate
+    return [base_text]
 
 
 # ============================================================
@@ -279,13 +201,17 @@ def plate_format_score(
 
         score -= 25
 
-    elif length in [4, 5, 6, 7]:
+    elif length in [4, 5, 6]:
+
+        score += 15
+
+    elif length in [7, 8, 9]:
+
+        score += 25
+
+    elif length == 10:
 
         score += 20
-
-    elif length in [8, 9, 10]:
-
-        score += 5
 
     else:
 
@@ -302,7 +228,7 @@ def plate_format_score(
 
 
     # ========================================================
-    # COMMON LETTER + NUMBER FORMAT
+    # COMMON LETTER + NUMBER FORMAT (single-line: 2-3 letters + 3-4 digits)
     # ========================================================
 
     if re.match(
@@ -311,6 +237,20 @@ def plate_format_score(
     ):
 
         score += 80
+
+
+    # ========================================================
+    # TWO-LINE PLATE FORMAT (2-3 letters + 4-7 digits)
+    # Common for Pakistani two-line plates like LE151051
+    # Higher bonus than single-line to favor complete two-line reads
+    # ========================================================
+
+    if re.match(
+        r"^[A-Z]{2,3}\d{4,7}$",
+        text
+    ):
+
+        score += 100
 
 
     # ========================================================
