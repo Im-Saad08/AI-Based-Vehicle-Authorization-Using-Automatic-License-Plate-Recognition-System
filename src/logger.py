@@ -113,7 +113,7 @@ def log_entry(
             time,
             image_name,
             plate_number,
-            confidence,
+            f"{confidence*100:.1f}%",
             status
         ])
 

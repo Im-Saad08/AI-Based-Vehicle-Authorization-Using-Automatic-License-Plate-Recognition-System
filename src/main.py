@@ -72,7 +72,7 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/DSC_1022.JPG"
+INPUT_PATH = "img/input/Cars/DSC_1060.JPG"
 
 
 # ============================================================
@@ -1350,7 +1350,7 @@ if INPUT_MODE == "image":
 
             continue
 
-        image_name = os.path.basename(
+        image_name = "img_" + os.path.basename(
             image_path
         )
 
@@ -1452,7 +1452,7 @@ elif INPUT_MODE == "video":
 
             frame,
 
-            f"video_frame_{frame_number}"
+            f"vid_f{frame_number}"
 
         )
 
@@ -1639,7 +1639,7 @@ elif INPUT_MODE == "webcam":
 
             frame,
 
-            f"webcam_frame_{frame_number}"
+            f"cam_f{frame_number}"
 
         )
 
