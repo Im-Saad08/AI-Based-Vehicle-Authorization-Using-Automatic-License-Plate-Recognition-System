@@ -278,7 +278,7 @@ def detect_and_crop(
             # CROP PLATE WITH MARGIN PADDING
             # =================================================
             pad_w = int(box_width * 0.10)
-            pad_h = int(box_height * 0.40)
+            pad_h = int(box_height * 0.15)
 
             crop_x1 = max(0, x1 - pad_w)
             crop_y1 = max(0, y1 - pad_h)
