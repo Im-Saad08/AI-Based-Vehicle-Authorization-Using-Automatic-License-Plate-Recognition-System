@@ -58,7 +58,7 @@ from normalize_plate import format_plate_display
 # Change ONLY this variable when changing input type.
 
 INPUT_MODE = "video"
-
+#video processing got improved, from processing 10sec/321f in ~1hr to 2 minutes
 
 # ============================================================
 # INPUT PATH
