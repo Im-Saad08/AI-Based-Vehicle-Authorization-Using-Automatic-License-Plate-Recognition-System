@@ -633,7 +633,9 @@ def print_all_ocr_history():
 def finalize_vehicle(
     track_id,
     plate_yolo_confidence,
-    plate_image_name
+    plate_image_name,
+    override_plate=None,
+    override_confidence=None
 ):
 
     global authorized_count
@@ -642,28 +644,37 @@ def finalize_vehicle(
 
     finalization_attempt_count += 1
 
-    consensus = get_consensus_plate(
-        track_id
-    )
+    # High-confidence bypass: use provided override values
+    if override_plate is not None and override_confidence is not None:
+        detected_plate = override_plate
+        ocr_confidence = override_confidence
+        consensus = None
+    else:
+        consensus = get_consensus_plate(
+            track_id
+        )
 
-    if consensus is None:
+        if consensus is None:
+            return False
 
-        return False
-
-    detected_plate = consensus["text"]
-
-    ocr_confidence = consensus[
-        "average_confidence"
-    ]
+        detected_plate = consensus["text"]
+        ocr_confidence = consensus[
+            "average_confidence"
+        ]
 
     print(
         "\n"
         + "=" * 60
     )
 
-    print(
-        "FINAL OCR CONSENSUS"
-    )
+    if consensus is not None:
+        print(
+            "FINAL OCR CONSENSUS"
+        )
+    else:
+        print(
+            "FINAL OCR (HIGH-CONFIDENCE SINGLE READ)"
+        )
 
     print(
         "=" * 60
@@ -679,20 +690,24 @@ def finalize_vehicle(
         f"{detected_plate}"
     )
 
-    print(
-        f"Repetitions         : "
-        f"{consensus['repetitions']}"
-    )
-
-    print(
-        f"Average OCR Conf.   : "
-        f"{ocr_confidence:.2f}"
-    )
-
-    print(
-        f"Average OCR Score   : "
-        f"{consensus['average_score']:.2f}"
-    )
+    if consensus is not None:
+        print(
+            f"Repetitions         : "
+            f"{consensus['repetitions']}"
+        )
+        print(
+            f"Average OCR Conf.   : "
+            f"{ocr_confidence:.2f}"
+        )
+        print(
+            f"Average OCR Score   : "
+            f"{consensus['average_score']:.2f}"
+        )
+    else:
+        print(
+            f"Single-read Conf.   : "
+            f"{ocr_confidence:.2f}"
+        )
 
     print_ocr_history(
         track_id
@@ -956,6 +971,22 @@ def process_plate(
         track_id
     )
 
+    # High-confidence single-read finalization (Option 1) — runs regardless of consensus
+    if ocr_confidence >= HIGH_CONFIDENCE_ACCEPT:
+        print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {HIGH_CONFIDENCE_ACCEPT} — finalizing immediately (high-confidence bypass).")
+        # Finalize directly without waiting for consensus
+        finalized = finalize_vehicle(
+            track_id,
+            plate_yolo_confidence=plate["yolo_confidence"],
+            plate_image_name=plate["image_name"],
+            override_plate=detected_plate,
+            override_confidence=ocr_confidence
+        )
+        if finalized:
+            logged_track_ids.add(track_id)
+            track_reached_confidence_threshold.add(track_id)
+            return True
+
     if consensus is not None:
 
         print()
@@ -970,10 +1001,18 @@ def process_plate(
             f"{consensus['repetitions']}"
         )
 
-        # Rule 3: If consensus confidence is high enough, stop OCR for this track
-        if consensus['average_confidence'] >= OCR_CONFIDENCE_THRESHOLD:
-            track_reached_confidence_threshold.add(track_id)
-            print(f"Track ID {track_id}: Consensus confidence {consensus['average_confidence']:.2f} >= {OCR_CONFIDENCE_THRESHOLD}, stopping OCR for this track.")
+        # Consensus-based finalization (existing logic)
+        if consensus['average_confidence'] >= OCR_CONFIDENCE_THRESHOLD and consensus['repetitions'] >= MIN_PLATE_REPETITIONS:
+            print(f"Track ID {track_id}: Consensus ready (conf={consensus['average_confidence']:.2f}, reps={consensus['repetitions']}), finalizing.")
+            finalized = finalize_vehicle(
+                track_id,
+                plate_yolo_confidence=plate["yolo_confidence"],
+                plate_image_name=plate["image_name"]
+            )
+            if finalized:
+                logged_track_ids.add(track_id)
+                track_reached_confidence_threshold.add(track_id)
+                return True
 
     else:
 
@@ -981,10 +1020,11 @@ def process_plate(
             "\nNot enough OCR evidence yet."
         )
 
-        # Rule 3: Also check individual OCR confidence
-        if ocr_confidence >= OCR_CONFIDENCE_THRESHOLD:
+        # Only stop OCR for very high confidence single reads (>= HIGH_CONFIDENCE_ACCEPT)
+        # Reads between 0.50 and 0.85 continue accumulating for consensus
+        if ocr_confidence >= HIGH_CONFIDENCE_ACCEPT:
             track_reached_confidence_threshold.add(track_id)
-            print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {OCR_CONFIDENCE_THRESHOLD}, stopping OCR for this track.")
+            print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {HIGH_CONFIDENCE_ACCEPT}, stopping OCR for this track.")
 
     return False
 
@@ -1253,59 +1293,6 @@ def process_tracking_frame(
                 track_id=track_id
 
             )
-
-            # =================================================
-            # TRY FINALIZATION
-            # =================================================
-
-            if track_id not in ocr_history:
-
-                continue
-
-            consensus = get_consensus_plate(
-                track_id
-            )
-
-            if consensus is None:
-
-                continue
-
-            # =================================================
-            # FINALIZE
-            # =================================================
-
-            last_plate = plate_info
-
-            finalized = finalize_vehicle(
-
-                track_id,
-
-                plate_yolo_confidence=(
-                    last_plate[
-                        "yolo_confidence"
-                    ]
-                ),
-
-                plate_image_name=(
-                    last_plate[
-                        "image_name"
-                    ]
-                )
-
-            )
-
-            if finalized:
-
-                logged_track_ids.add(
-                    track_id
-                )
-
-                print()
-
-                print(
-                    f"Vehicle Track ID "
-                    f"{track_id} completed."
-                )
 
 
 # ============================================================
