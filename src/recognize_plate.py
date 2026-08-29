@@ -883,8 +883,9 @@ def recognize_plate(
             return False
         # Must match basic pattern: some letters, then some digits (allow some mixing)
         # Reject patterns with multiple letter-digit transitions (garbage)
+        # Compare SAME property (isalpha vs isalpha) - NOT isalpha vs isdigit!
         transitions = sum(1 for i in range(1, len(text))
-                         if text[i-1].isalpha() != text[i].isdigit())
+                         if text[i-1].isalpha() != text[i].isalpha())
         # Valid plate: 0 or 1 transition (all letters -> all digits)
         # Garbage: 2+ transitions (e.g., AA7800AAZ80 has transitions: A->7, 0->A, Z->8)
         return transitions <= 1
@@ -893,6 +894,7 @@ def recognize_plate(
         candidates,
         key=lambda x: x["confidence"]
     )
+
     if (best_so_far["confidence"] >= EARLY_EXIT_CONFIDENCE
             and len(best_so_far["text"]) >= 3
             and looks_like_plate(best_so_far["text"])):

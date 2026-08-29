@@ -72,7 +72,7 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/DSC_0969.JPG"
+INPUT_PATH = "img/input/Cars/AKF938.jpeg"
 
 
 # ============================================================
