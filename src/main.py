@@ -254,7 +254,7 @@ MIN_PLATE_REPETITIONS = 2
 # ============================================================
 
 # Maximum OCR attempts per track ID before giving up
-MAX_OCR_ATTEMPTS_PER_TRACK = 5
+MAX_OCR_ATTEMPTS_PER_TRACK = 3
 
 # Confidence threshold at which we consider OCR "good enough" and stop retrying
 # Once a track reaches this confidence, we skip OCR for that track entirely
