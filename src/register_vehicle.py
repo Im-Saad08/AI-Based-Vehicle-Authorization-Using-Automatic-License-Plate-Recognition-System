@@ -1,9 +1,8 @@
-from ultralytics import YOLO
-import easyocr
 import pandas as pd
-import cv2
 import os
 
+from detect_and_crop_plate import detect_and_crop
+from recognize_plate import recognize_plate
 from normalize_plate import normalize_plate_text
 
 
@@ -11,32 +10,11 @@ from normalize_plate import normalize_plate_text
 # FILE PATHS
 # ==================================================
 
-MODEL_PATH = (
-    "run_model/detect/runs/"
-    "license_plate_detector/weights/best.pt"
+VEHICLES_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data",
+    "vehicles.csv"
 )
-
-VEHICLES_FILE = "data/vehicles.csv"
-
-
-# ==================================================
-# INITIALIZE MODELS
-# ==================================================
-
-print("\nLoading YOLO model...")
-
-yolo_model = YOLO(
-    MODEL_PATH
-)
-
-print("Loading EasyOCR...")
-
-ocr_reader = easyocr.Reader(
-    ['en'],
-    gpu=False
-)
-
-print("Models loaded successfully.")
 
 
 # ==================================================
@@ -81,83 +59,27 @@ if not os.path.exists(image_path):
     exit()
 
 
-image = cv2.imread(
-    image_path
-)
-
-if image is None:
-
-    print(
-        "\nError: Unable to read the image."
-    )
-
-    exit()
-
-
 # ==================================================
-# RUN YOLO LICENSE PLATE DETECTION
+# RUN SHARED DETECTION + CROP PIPELINE
 # ==================================================
 
 print(
     "\nDetecting license plate..."
 )
 
-results = yolo_model.predict(
-    source=image_path,
-    conf=0.5,
-    save=False
+# Use shared detect_and_crop (same as video/webcam modes)
+# save_output=False to avoid saving temp files for registration
+cropped_plates = detect_and_crop(
+    image_input=image_path,
+    save_output=False
 )
-
-
-# ==================================================
-# COLLECT DETECTED PLATES
-# ==================================================
-
-detected_plates = []
-
-for result in results:
-
-    for box in result.boxes:
-
-        # ------------------------------------------
-        # Bounding box coordinates
-        # ------------------------------------------
-
-        x1, y1, x2, y2 = map(
-            int,
-            box.xyxy[0]
-        )
-
-        # ------------------------------------------
-        # YOLO confidence
-        # ------------------------------------------
-
-        detection_confidence = float(
-            box.conf[0]
-        )
-
-        # ------------------------------------------
-        # Crop from original clean image
-        # ------------------------------------------
-
-        plate_crop = image[
-            y1:y2,
-            x1:x2
-        ].copy()
-
-        detected_plates.append(
-            (
-                plate_crop,
-                detection_confidence
-            )
-        )
 
 
 # ==================================================
 # CHECK IF PLATE WAS DETECTED
 # ==================================================
 
-if len(detected_plates) == 0:
+if len(cropped_plates) == 0:
 
     print(
         "\nNo license plate detected."
@@ -178,14 +100,15 @@ if len(detected_plates) == 0:
 # Registration is intended for one vehicle
 # at a time, so select the strongest detection.
 
-detected_plates.sort(
-    key=lambda x: x[1],
+cropped_plates.sort(
+    key=lambda x: x["yolo_confidence"],
     reverse=True
 )
 
-plate_crop = detected_plates[0][0]
+best_plate = cropped_plates[0]
 
-yolo_confidence = detected_plates[0][1]
+plate_crop = best_plate["image"]
+yolo_confidence = best_plate["yolo_confidence"]
 
 
 print(
@@ -197,11 +120,10 @@ print(
     f"{yolo_confidence:.2f}"
 )
 
-
-if len(detected_plates) > 1:
+if len(cropped_plates) > 1:
 
     print(
-        f"Warning: {len(detected_plates)} "
+        f"Warning: {len(cropped_plates)} "
         "license plates detected."
     )
 
@@ -212,83 +134,26 @@ if len(detected_plates) > 1:
 
 
 # ==================================================
-# RUN EASYOCR
+# RUN PADDLEOCR RECOGNITION-ONLY PIPELINE
 # ==================================================
 
 print(
     "\nReading license plate "
-    "using EasyOCR..."
+    "using PaddleOCR (recognition-only)..."
 )
 
-ocr_results = ocr_reader.readtext(
-    plate_crop
-)
+ocr_result = recognize_plate(plate_crop)
 
+detected_text = ocr_result["plate_text"]
+ocr_confidence = ocr_result["confidence"]
 
-# ==================================================
-# CHECK OCR RESULT
-# ==================================================
-
-if len(ocr_results) == 0:
-
+if not detected_text:
     print(
-        "\nEasyOCR could not read "
+        "\nPaddleOCR could not read "
         "any text."
     )
-
     detected_text = ""
-
     ocr_confidence = 0.0
-
-
-else:
-
-    detected_texts = []
-
-    confidence_scores = []
-
-    print(
-        "\nOCR Results:"
-    )
-
-    for detection in ocr_results:
-
-        bbox, text, confidence = detection
-
-        detected_texts.append(
-            text
-        )
-
-        confidence_scores.append(
-            confidence
-        )
-
-        print(
-            f"Text       : {text}"
-        )
-
-        print(
-            f"Confidence : "
-            f"{confidence:.2f}"
-        )
-
-
-    # ------------------------------------------
-    # Combine raw OCR text
-    # ------------------------------------------
-
-    detected_text = " ".join(
-        detected_texts
-    )
-
-
-    # ------------------------------------------
-    # Minimum OCR confidence
-    # ------------------------------------------
-
-    ocr_confidence = min(
-        confidence_scores
-    )
 
 
 # ==================================================
