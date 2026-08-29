@@ -8,6 +8,8 @@ import sys
 import cv2
 import re
 import time
+import queue
+import threading
 
 from ultralytics import YOLO
 
@@ -57,7 +59,7 @@ from normalize_plate import format_plate_display
 #
 # Change ONLY this variable when changing input type.
 
-INPUT_MODE = "webcam"
+INPUT_MODE = "image"
 #video processing got improved, from processing 10sec/321f in ~1hr to 2 minutes
 
 # ============================================================
@@ -73,7 +75,7 @@ INPUT_MODE = "webcam"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = 0
+INPUT_PATH = "img/input/Cars/DSC_0997.JPG"
 
 
 # ============================================================
@@ -171,6 +173,16 @@ plate_model = YOLO(
 
 print(
     "License plate model loaded successfully."
+)
+
+print(
+    "\nLoading OCR recognition engine..."
+)
+# Trigger OCR engine initialization early (recognition-only loads on first use)
+from recognize_plate import get_recognition_only_ocr
+get_recognition_only_ocr()
+print(
+    "OCR recognition engine loaded successfully."
 )
 
 
@@ -282,6 +294,73 @@ ocr_history = {}
 
 
 # ============================================================
+# THREADED OCR WORKER (Webcam mode only)
+# ============================================================
+
+# Queue for OCR jobs: (track_id, plate_crop, plate_info, frame_name)
+ocr_job_queue = queue.Queue()
+
+# Queue for OCR results: (track_id, ocr_result, plate_info, frame_name)
+ocr_result_queue = queue.Queue()
+
+# Worker thread reference
+ocr_worker_thread = None
+
+# Worker running flag
+ocr_worker_running = False
+
+
+def ocr_worker():
+    """Background thread that processes OCR jobs from the queue."""
+    global ocr_worker_running
+    print("[OCR Worker] Started")
+    while ocr_worker_running:
+        try:
+            # Get job with timeout to allow checking running flag
+            job = ocr_job_queue.get(timeout=0.1)
+            if job is None:  # Sentinel to stop
+                break
+
+            track_id, plate_crop, plate_info, frame_name = job
+
+            # Run OCR (this is the slow blocking call)
+            ocr_result = recognize_plate(plate_crop)
+
+            # Put result back to main thread
+            ocr_result_queue.put((track_id, ocr_result, plate_info, frame_name))
+
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"[OCR Worker] Error: {e}")
+            # Put empty result to avoid deadlock
+            if 'track_id' in locals():
+                ocr_result_queue.put((track_id, {"plate_text": "", "confidence": 0.0, "score": -100}, plate_info, frame_name))
+
+    print("[OCR Worker] Stopped")
+
+
+def start_ocr_worker():
+    """Start the OCR worker thread."""
+    global ocr_worker_thread, ocr_worker_running
+    if ocr_worker_thread is None or not ocr_worker_thread.is_alive():
+        ocr_worker_running = True
+        ocr_worker_thread = threading.Thread(target=ocr_worker, daemon=True)
+        ocr_worker_thread.start()
+        print("[OCR Worker] Thread started")
+
+
+def stop_ocr_worker():
+    """Stop the OCR worker thread."""
+    global ocr_worker_running, ocr_worker_thread
+    if ocr_worker_thread is not None and ocr_worker_thread.is_alive():
+        ocr_worker_running = False
+        ocr_job_queue.put(None)  # Sentinel to unblock queue.get()
+        ocr_worker_thread.join(timeout=2.0)
+        print("[OCR Worker] Thread stopped")
+
+
+# ============================================================
 # PER-TRACK OCR ATTEMPT TRACKING (CPU Efficiency Rule 3)
 # ============================================================
 
@@ -347,8 +426,8 @@ def process_webcam_frame(
 
     process_webcam_frame._last_process_time = current_time
 
-    # Call the shared tracking logic
-    process_tracking_frame(frame, frame_name)
+    # Call the shared tracking logic with async_mode=True for webcam
+    process_tracking_frame(frame, frame_name, async_mode=True)
     return True  # Frame processed
 
 
@@ -662,6 +741,158 @@ def print_all_ocr_history():
 
 
 # ============================================================
+# HANDLE ASYNC OCR RESULT (Webcam mode)
+# ============================================================
+
+def handle_async_ocr_result(
+    track_id,
+    ocr_result,
+    plate,
+    frame_name
+):
+    """
+    Process an OCR result from the async worker thread.
+    This mirrors the VIDEO/WEBCAM logic in process_plate() but receives
+    the OCR result as a parameter instead of calling recognize_plate().
+    """
+    global ocr_success_count
+    global ocr_failure_count
+
+    detected_plate = ocr_result["plate_text"]
+    ocr_confidence = ocr_result["confidence"]
+    ocr_score = ocr_result.get("score", 0)
+
+    print(
+        "\n"
+        + "-" * 60
+    )
+
+    print(
+        f"Async OCR Result: {frame_name}"
+    )
+
+    print(
+        f"Vehicle Track ID    : "
+        f"{track_id}"
+    )
+
+    # ========================================================
+    # OCR FAILURE
+    # ========================================================
+
+    if not detected_plate:
+
+        ocr_failure_count += 1
+
+        print(
+            "\nNo readable plate text detected."
+        )
+
+        print(
+            "Vehicle will be checked again "
+            "in a later frame."
+        )
+
+        return
+
+    # ========================================================
+    # OCR SUCCESS
+    # ========================================================
+
+    ocr_success_count += 1
+
+    add_ocr_observation(
+
+        track_id,
+
+        detected_plate,
+
+        ocr_confidence,
+
+        ocr_score
+
+    )
+
+    print()
+
+    print(
+        f"OCR Observation     : "
+        f"{detected_plate}"
+    )
+
+    print(
+        f"OCR Confidence      : "
+        f"{ocr_confidence:.2f}"
+    )
+
+    print(
+        f"OCR Score           : "
+        f"{ocr_score:.2f}"
+    )
+
+    consensus = get_consensus_plate(
+        track_id
+    )
+
+    # High-confidence single-read finalization (Option 1) — runs regardless of consensus
+    if ocr_confidence >= HIGH_CONFIDENCE_ACCEPT:
+        print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {HIGH_CONFIDENCE_ACCEPT} — finalizing immediately (high-confidence bypass).")
+        # Finalize directly without waiting for consensus
+        finalized = finalize_vehicle(
+            track_id,
+            plate_yolo_confidence=plate["yolo_confidence"],
+            plate_image_name=plate["image_name"],
+            override_plate=detected_plate,
+            override_confidence=ocr_confidence
+        )
+        if finalized:
+            logged_track_ids.add(track_id)
+            track_reached_confidence_threshold.add(track_id)
+            return
+
+    if consensus is not None:
+
+        print()
+
+        print(
+            f"Current consensus   : "
+            f"{consensus['text']}"
+        )
+
+        print(
+            f"Repetitions         : "
+            f"{consensus['repetitions']}"
+        )
+
+        # Consensus-based finalization (existing logic)
+        if consensus['average_confidence'] >= OCR_CONFIDENCE_THRESHOLD and consensus['repetitions'] >= MIN_PLATE_REPETITIONS:
+            print(f"Track ID {track_id}: Consensus ready (conf={consensus['average_confidence']:.2f}, reps={consensus['repetitions']}), finalizing.")
+            finalized = finalize_vehicle(
+                track_id,
+                plate_yolo_confidence=plate["yolo_confidence"],
+                plate_image_name=plate["image_name"]
+            )
+            if finalized:
+                logged_track_ids.add(track_id)
+                track_reached_confidence_threshold.add(track_id)
+                return
+
+    else:
+
+        print(
+            "\nNot enough OCR evidence yet."
+        )
+
+        # Only stop OCR for very high confidence single reads (>= HIGH_CONFIDENCE_ACCEPT)
+        # Reads between 0.50 and 0.85 continue accumulating for consensus
+        if ocr_confidence >= HIGH_CONFIDENCE_ACCEPT:
+            track_reached_confidence_threshold.add(track_id)
+            print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {HIGH_CONFIDENCE_ACCEPT}, stopping OCR for this track.")
+
+    return
+
+
+# ============================================================
 # FINALIZE VEHICLE
 # ============================================================
 
@@ -832,8 +1063,22 @@ def finalize_vehicle(
 def process_plate(
     plate,
     image_name,
-    track_id=None
+    track_id=None,
+    async_mode=False
 ):
+    """
+    Process a plate crop through OCR and authorization.
+
+    Args:
+        plate: dict with 'image', 'image_name', 'yolo_confidence', 'box'
+        image_name: string identifier for logging
+        track_id: track ID for video/webcam mode, None for image mode
+        async_mode: if True, submit to OCR queue and return immediately (webcam mode)
+
+    Returns:
+        For sync mode (image/video): bool (True if finalized/logged)
+        For async mode (webcam): None (result handled via queue)
+    """
 
     global ocr_success_count
     global ocr_failure_count
@@ -866,7 +1111,19 @@ def process_plate(
         )
 
     # ========================================================
-    # OCR
+    # ASYNC MODE (WEBCAM) - Submit to queue, return immediately
+    # ========================================================
+
+    if async_mode:
+        # Increment call count now (will be accurate even if async)
+        ocr_call_count += 1
+        # Submit job to OCR worker queue
+        ocr_job_queue.put((track_id, plate_image, plate, image_name))
+        print(f"Track ID {track_id}: OCR job queued (async)")
+        return None
+
+    # ========================================================
+    # SYNC MODE (IMAGE/VIDEO) - Run OCR directly
     # ========================================================
 
     ocr_call_count += 1
@@ -970,7 +1227,7 @@ def process_plate(
         return True
 
     # ========================================================
-    # VIDEO / WEBCAM
+    # VIDEO MODE (SYNC WEBCAM NOT USED)
     # ========================================================
 
     add_ocr_observation(
@@ -1110,7 +1367,8 @@ def process_image(
 
 def process_tracking_frame(
     frame,
-    frame_name
+    frame_name,
+    async_mode=False
 ):
 
     global vehicle_detection_count
@@ -1325,7 +1583,8 @@ def process_tracking_frame(
 
                 frame_name,
 
-                track_id=track_id
+                track_id=track_id,
+                async_mode=async_mode
 
             )
 
@@ -1732,6 +1991,9 @@ elif INPUT_MODE == "webcam":
         "\nPress 'q' in the video window to stop."
     )
 
+    # Start OCR worker thread for async processing
+    start_ocr_worker()
+
     frame_number = 0
 
     while True:
@@ -1769,6 +2031,17 @@ elif INPUT_MODE == "webcam":
 
         )
 
+        # Check for completed OCR results from worker thread
+        while not ocr_result_queue.empty():
+            try:
+                track_id, ocr_result, plate, frame_name = ocr_result_queue.get_nowait()
+                # Process the OCR result (this handles consensus, finalization, logging)
+                handle_async_ocr_result(track_id, ocr_result, plate, frame_name)
+            except queue.Empty:
+                break
+            except Exception as e:
+                print(f"Error handling async OCR result: {e}")
+
         # Display live feed with detection boxes
         cv2.imshow("SENTRYX - AI-Based Vehicle Authorization Using ALPR", frame)
 
@@ -1777,6 +2050,9 @@ elif INPUT_MODE == "webcam":
         if key == ord('q'):
             print("\n'q' pressed — exiting webcam mode.")
             break
+
+    # Stop OCR worker
+    stop_ocr_worker()
 
     camera.release()
     cv2.destroyAllWindows()
