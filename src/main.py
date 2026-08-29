@@ -57,7 +57,7 @@ from normalize_plate import format_plate_display
 #
 # Change ONLY this variable when changing input type.
 
-INPUT_MODE = "video"
+INPUT_MODE = "webcam"
 #video processing got improved, from processing 10sec/321f in ~1hr to 2 minutes
 
 # ============================================================
@@ -73,7 +73,7 @@ INPUT_MODE = "video"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/video.mp4"
+INPUT_PATH = 0
 
 
 # ============================================================
@@ -315,6 +315,41 @@ finalization_attempt_count = 0
 authorized_count = 0
 
 unauthorized_count = 0
+
+
+# ============================================================
+# WEBCAM WRAPPER (adds real-time frame-dropping)
+# ============================================================
+
+def process_webcam_frame(
+    frame,
+    frame_name,
+    target_fps=15.0  # Target processing FPS for real-time feel
+):
+    """
+    Webcam-specific wrapper around process_tracking_frame.
+    Drops frames if processing falls behind target_fps to maintain responsiveness.
+    """
+    import time
+
+    # Static variables for frame timing (using function attributes)
+    if not hasattr(process_webcam_frame, "_last_process_time"):
+        process_webcam_frame._last_process_time = 0.0
+    if not hasattr(process_webcam_frame, "_frame_interval"):
+        process_webcam_frame._frame_interval = 1.0 / target_fps
+
+    current_time = time.perf_counter()
+    elapsed = current_time - process_webcam_frame._last_process_time
+
+    # If we're behind schedule, skip this frame (drop it)
+    if elapsed < process_webcam_frame._frame_interval:
+        return False  # Frame dropped
+
+    process_webcam_frame._last_process_time = current_time
+
+    # Call the shared tracking logic
+    process_tracking_frame(frame, frame_name)
+    return True  # Frame processed
 
 
 # ============================================================
@@ -1294,6 +1329,27 @@ def process_tracking_frame(
 
             )
 
+    # ========================================================
+    # DRAW DETECTION BOXES ON FRAME FOR LIVE DISPLAY
+    # ========================================================
+    # Draw all detected plate boxes with track IDs
+    for result in results:
+        if result.boxes is None or len(result.boxes) == 0:
+            continue
+        boxes = result.boxes.xyxy
+        if result.boxes.id is not None:
+            track_ids = result.boxes.id
+            for box, track_id_tensor in zip(boxes, track_ids):
+                x1, y1, x2, y2 = map(int, box)
+                track_id = int(track_id_tensor)
+                color = (0, 255, 0) if track_id in logged_track_ids else (0, 255, 255)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                label = f"ID:{track_id}"
+                if track_id in logged_track_ids:
+                    label += " ✓"
+                cv2.putText(frame, label, (x1, max(y1 - 10, 20)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
 
 # ============================================================
 # START SYSTEM
@@ -1673,8 +1729,7 @@ elif INPUT_MODE == "webcam":
     )
 
     print(
-        "\nPress CTRL+C in terminal "
-        "to stop."
+        "\nPress 'q' in the video window to stop."
     )
 
     frame_number = 0
@@ -1706,7 +1761,7 @@ elif INPUT_MODE == "webcam":
             f"{frame_number}"
         )
 
-        process_tracking_frame(
+        process_webcam_frame(
 
             frame,
 
@@ -1714,7 +1769,17 @@ elif INPUT_MODE == "webcam":
 
         )
 
+        # Display live feed with detection boxes
+        cv2.imshow("SENTRYX - AI-Based Vehicle Authorization Using ALPR", frame)
+
+        # Check for 'q' key to exit cleanly
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            print("\n'q' pressed — exiting webcam mode.")
+            break
+
     camera.release()
+    cv2.destroyAllWindows()
 
     print_all_ocr_history()
 
