@@ -7,6 +7,7 @@ import os
 import sys
 import cv2
 import re
+import time
 
 from ultralytics import YOLO
 
@@ -56,7 +57,7 @@ from normalize_plate import format_plate_display
 #
 # Change ONLY this variable when changing input type.
 
-INPUT_MODE = "image"
+INPUT_MODE = "video"
 
 
 # ============================================================
@@ -72,7 +73,7 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/DMP338.jpeg"
+INPUT_PATH = "img/input/video.mp4"
 
 
 # ============================================================
@@ -223,11 +224,11 @@ VEHICLE_CLASSES = [
 
 # 1 = process every frame
 # 2 = process every second frame
-# 3 = process every third frame
+# 3 = process every third frame (CPU efficiency: skip 2/3 frames)
 #
 # For testing OCR/tracking, keep this at 1.
 
-FRAME_SKIP = 1
+FRAME_SKIP = 3
 
 
 # ============================================================
@@ -247,6 +248,22 @@ MIN_OCR_OBSERVATIONS = 3
 
 MIN_PLATE_REPETITIONS = 2
 
+
+# ============================================================
+# PER-TRACK OCR GATING (CPU Efficiency Rule 3)
+# ============================================================
+
+# Maximum OCR attempts per track ID before giving up
+MAX_OCR_ATTEMPTS_PER_TRACK = 3
+
+# Confidence threshold at which we consider OCR "good enough" and stop retrying
+# Once a track reaches this confidence, we skip OCR for that track entirely
+OCR_CONFIDENCE_THRESHOLD = 0.50
+
+# High confidence accept: a single OCR read at or above this confidence
+# finalizes the track immediately, without waiting for consensus.
+HIGH_CONFIDENCE_ACCEPT = 0.85
+
 MAX_OCR_HISTORY = 10
 
 
@@ -265,6 +282,17 @@ ocr_history = {}
 
 
 # ============================================================
+# PER-TRACK OCR ATTEMPT TRACKING (CPU Efficiency Rule 3)
+# ============================================================
+
+# Track how many OCR attempts have been made per track ID
+ocr_attempts_per_track = {}
+
+# Track whether a track has reached the confidence threshold
+track_reached_confidence_threshold = set()
+
+
+# ============================================================
 # STATISTICS
 # ============================================================
 
@@ -279,6 +307,8 @@ plate_detection_count = 0
 ocr_success_count = 0
 
 ocr_failure_count = 0
+
+ocr_call_count = 0
 
 finalization_attempt_count = 0
 
@@ -757,6 +787,7 @@ def process_plate(
 
     global ocr_success_count
     global ocr_failure_count
+    global ocr_call_count
 
     plate_image = plate["image"]
 
@@ -787,6 +818,8 @@ def process_plate(
     # ========================================================
     # OCR
     # ========================================================
+
+    ocr_call_count += 1
 
     ocr_result = recognize_plate(
         plate_image
@@ -937,11 +970,21 @@ def process_plate(
             f"{consensus['repetitions']}"
         )
 
+        # Rule 3: If consensus confidence is high enough, stop OCR for this track
+        if consensus['average_confidence'] >= OCR_CONFIDENCE_THRESHOLD:
+            track_reached_confidence_threshold.add(track_id)
+            print(f"Track ID {track_id}: Consensus confidence {consensus['average_confidence']:.2f} >= {OCR_CONFIDENCE_THRESHOLD}, stopping OCR for this track.")
+
     else:
 
         print(
             "\nNot enough OCR evidence yet."
         )
+
+        # Rule 3: Also check individual OCR confidence
+        if ocr_confidence >= OCR_CONFIDENCE_THRESHOLD:
+            track_reached_confidence_threshold.add(track_id)
+            print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {OCR_CONFIDENCE_THRESHOLD}, stopping OCR for this track.")
 
     return False
 
@@ -1166,13 +1209,36 @@ def process_tracking_frame(
                 continue
 
             plate_info = {
-                "crop": plate_crop,
+                "image": plate_crop,
                 "box": (x1, y1, x2, y2),
                 "yolo_confidence": 0.90,
                 "image_name": f"{frame_name}_plate_{track_id}.png"
             }
 
             plate_detection_count += 1
+
+            # =================================================
+            # PER-TRACK OCR GATING (Rule 3)
+            # Check if we should run OCR for this track
+            # =================================================
+
+            # Initialize attempt counter if new track
+            if track_id not in ocr_attempts_per_track:
+                ocr_attempts_per_track[track_id] = 0
+
+            # Skip OCR if track already reached confidence threshold
+            if track_id in track_reached_confidence_threshold:
+                print(f"Track ID {track_id}: Already has confident OCR result, skipping OCR.")
+                continue
+
+            # Skip OCR if max attempts reached
+            if ocr_attempts_per_track[track_id] >= MAX_OCR_ATTEMPTS_PER_TRACK:
+                print(f"Track ID {track_id}: Max OCR attempts ({MAX_OCR_ATTEMPTS_PER_TRACK}) reached, skipping OCR.")
+                continue
+
+            # Increment attempt counter
+            ocr_attempts_per_track[track_id] += 1
+            print(f"Track ID {track_id}: OCR attempt {ocr_attempts_per_track[track_id]}/{MAX_OCR_ATTEMPTS_PER_TRACK}")
 
             # =================================================
             # PROCESS PLATE DIRECTLY
@@ -1423,6 +1489,9 @@ elif INPUT_MODE == "video":
 
     frame_number = 0
 
+    # Start timing for total processing time
+    total_start_time = time.perf_counter()
+
     # ========================================================
     # READ VIDEO
     # ========================================================
@@ -1457,6 +1526,9 @@ elif INPUT_MODE == "video":
             f"vid_f{frame_number}"
 
         )
+
+    # Calculate total processing time
+    total_elapsed = time.perf_counter() - total_start_time
 
     # ========================================================
     # RELEASE
@@ -1493,6 +1565,11 @@ elif INPUT_MODE == "video":
     )
 
     print(
+        f"Total processing time       : "
+        f"{total_elapsed:.2f}s"
+    )
+
+    print(
         f"Frames processed            : "
         f"{frame_number // FRAME_SKIP}"
     )
@@ -1525,6 +1602,11 @@ elif INPUT_MODE == "video":
     print(
         f"OCR failed                  : "
         f"{ocr_failure_count}"
+    )
+
+    print(
+        f"OCR calls made              : "
+        f"{ocr_call_count}"
     )
 
     print(
