@@ -1,14 +1,14 @@
-# 🚗 AI-Based Vehicle Authorization Using Automatic License Plate Recognition System (V2 Updated)
+# SENTRYX - An AI-Based Vehicle Authorization Using Automatic License Plate Recognition System
 
 An optimized, single-stage AI Vehicle Authorization System designed for real-time license plate detection, text recognition, region filtering, character normalization, database verification, and access logging.
 
 ---
 
-## 📌 Executive Summary & Key Upgrades
+## Executive Summary & Key Upgrades
 
 This updated system transitions from a heavy two-stage pipeline to a **high-speed Single-Stage Direct License Plate Detection & In-Memory OCR Architecture**, specifically tuned for dual-core Intel CPU laptops.
 
-### ⚡ Primary Performance Milestones
+### Primary Performance Milestones
 * **Single-Stage YOLOv8 LPD**: Directly detects license plates from incoming video frames, bypassing full vehicle body detection and reducing CPU load by **50%**.
 * **In-Memory PaddleOCR Engine**: Eliminates per-call Python subprocesses, dropping single-image text recognition latency from **30+ seconds to < 0.1 seconds (~100x speedup)**.
 * **Early Exit Optimization**: Skips redundant image enhancement OCR passes when the original crop yields high confidence ($\ge 0.70$).
@@ -18,7 +18,7 @@ This updated system transitions from a heavy two-stage pipeline to a **high-spee
 
 ---
 
-## 🛠️ System Architecture & Workflow
+## System Architecture & Workflow
 
 ```mermaid
 flowchart TD
@@ -35,45 +35,9 @@ flowchart TD
     J --> L[Log Event: entry_log.csv]
     K --> L
 ```
-
 ---
 
-## 📂 Project Structure
-
-```
-Vehicle Authorization System-V2/
-│
-├── data/
-│   ├── vehicles.csv                # Authorized vehicle database (Plate, Owner, Department, Type)
-│   ├── entry_log.csv               # Live access log with timestamps & status
-│   └── ocr_results.csv             # OCR execution records
-│
-├── models/
-│   ├── trained/
-│   │   ├── rbflw_y8_best.pt        # Trained single-stage License Plate YOLOv8 model
-│   │   ├── yolo11n_best.pt
-│   │   ├── img_best.pt
-│   │   └── vid_best.pt
-│   └── pre_trained/
-│
-├── src/
-│   ├── main.py                     # Primary pipeline controller (Image, Video, Webcam)
-│   ├── detect_and_crop_plate.py    # Plate detection & 10% margin padding crop module
-│   ├── recognize_plate.py          # Fast In-Memory PaddleOCR engine & early exit
-│   ├── normalize_plate.py          # Region filtering, positional correction (4OOB -> 4008)
-│   ├── authorize_vehicle.py        # Database lookup & authorization logic
-│   ├── enhance_plate.py            # Image filters (contrast, sharpening, thresholding)
-│   ├── logger.py                   # CSV entry log recorder
-│   ├── register_vehicle.py         # Vehicle registration management
-│   └── test_model.py               # Single image model evaluator
-│
-├── paddleocr_env/                  # Unified virtual environment (Python 3.12 + PaddleOCR + Ultralytics)
-└── README.md
-```
-
----
-
-## ⚙ Module Breakdown
+## Module Breakdown
 
 ### 1. Direct Plate Detection (`src/detect_and_crop_plate.py`)
 Loads `rbflw_y8_best.pt` to detect license plate bounding boxes directly. Calculates box dimensions and enforces minimum size thresholds (`MIN_PLATE_WIDTH = 50px`, `MIN_PLATE_HEIGHT = 15px`). Adds 10% outer padding before cropping to guarantee full character inclusion.
@@ -92,9 +56,9 @@ Matches normalized plate strings against registered records in `data/vehicles.cs
 
 ---
 
-## 📊 Performance Benchmarks
+## Performance Benchmarks
 
-| Component / Metric | Legacy Pipeline | V2 Updated System |
+| Component / Metric | Legacy Pipeline | Updated System |
 | :--- | :--- | :--- |
 | **Detection Pipeline** | 2-Stage (Vehicle + Plate) | **1-Stage Direct Plate Detection** |
 | **OCR Execution Method** | Subprocess invocation | **In-Memory PaddleOCR** |
@@ -105,7 +69,7 @@ Matches normalized plate strings against registered records in `data/vehicles.cs
 
 ---
 
-## 🚀 How to Run the System
+## How to Run the System
 
 ### 1. Activate Environment in VS Code Terminal
 ```powershell
@@ -125,44 +89,9 @@ To switch input sources, update `INPUT_MODE` at the top of `src/main.py`:
 
 ---
 
-## 📷 Sample System Output
-
-```text
-======================================================================
-VEHICLE AUTHORIZATION SYSTEM
-======================================================================
-Processing image: img/input/Cars/DSC_1010.JPG
-
-YOLO detected 1 plate(s).
-Loading PaddleOCR engine in-memory for high speed...
-
-OCR Comparison
---------------------------------------------------------------------------------
-Original            MLE 4008       Conf=1.00  Score=145.00
---------------------------------------------------------------------------------
-Selected OCR: MLE 4008
-
-Detected Plate       : MLE4008
-Registration Year    : 
-OCR Confidence       : 1.00
-Plate YOLO Confidence: 0.82
-
-STATUS               : AUTHORIZED
-Owner                : Muhammad Saad
-Department           : Computer Engineering
-Vehicle Type         : Car
-Logging to: E:\Python Projects\Vehicle Authorization System-V2\data\entry_log.csv
-Entry logged successfully: MLE4008
-======================================================================
-PROCESSING COMPLETED IN < 0.1 SECONDS
-======================================================================
-```
-
----
-
-## 👨‍💻 Author & Contact Information
+## Author & Contact Information
 
 * **Author**: Muhammad Saad
 * **Role**: Computer Engineering Student
 * **Institution**: National University of Technology (NUTECH), Islamabad, Pakistan
-* **Project**: AI-Based Vehicle Authorization System V2
+* **Project**: SENTRYX - An AI-Based Vehicle Authorization Using Automatic License Plate Recognition System
