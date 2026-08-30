@@ -5,6 +5,21 @@
 
 import os
 import sys
+
+# ============================================================
+# LIMIT ONE/DNN/MKL THREADS BEFORE PADDLEOCR LOADS
+# ============================================================
+# oneDNN/mkldnn (used by PaddleOCR TextRecognition) defaults to
+# using ALL CPU cores. This starves the main thread's YOLO
+# inference (also CPU-bound) and causes 5-12s lag spikes.
+# Limit to 2 threads to leave headroom for YOLO (~150ms target).
+os.environ["OMP_NUM_THREADS"] = "2"
+os.environ["MKL_NUM_THREADS"] = "2"
+os.environ["OPENBLAS_NUM_THREADS"] = "2"
+os.environ["NUMEXPR_NUM_THREADS"] = "2"
+# Paddle-specific flags (must be set before first import)
+os.environ["FLAGS_enable_pir_api"] = "0"
+
 import cv2
 import re
 import time
@@ -59,7 +74,7 @@ from normalize_plate import format_plate_display
 #
 # Change ONLY this variable when changing input type.
 
-INPUT_MODE = "image"
+INPUT_MODE = "webcam"
 #video processing got improved, from processing 10sec/321f in ~1hr to 2 minutes
 
 # ============================================================
@@ -75,7 +90,7 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/DSC_0997.JPG"
+INPUT_PATH = 0
 
 
 # ============================================================
@@ -240,7 +255,7 @@ VEHICLE_CLASSES = [
 #
 # For testing OCR/tracking, keep this at 1.
 
-FRAME_SKIP = 3
+FRAME_SKIP = 10
 
 
 # ============================================================
@@ -427,7 +442,10 @@ def process_webcam_frame(
     process_webcam_frame._last_process_time = current_time
 
     # Call the shared tracking logic with async_mode=True for webcam
+    frame_start = time.perf_counter()
     process_tracking_frame(frame, frame_name, async_mode=True)
+    frame_elapsed = time.perf_counter() - frame_start
+    print(f"[TIMING] {frame_name}: process_tracking_frame total took {frame_elapsed*1000:.1f} ms")
     return True  # Frame processed
 
 
@@ -1375,10 +1393,13 @@ def process_tracking_frame(
     global vehicle_detection_with_id_count
     global plate_detection_count
 
+    import time
+
     # ========================================================
     # DIRECT LICENSE PLATE DETECTION + TRACKING
     # ========================================================
 
+    yolo_start = time.perf_counter()
     results = plate_model.track(
 
         source=frame,
@@ -1392,6 +1413,8 @@ def process_tracking_frame(
         verbose=False
 
     )
+    yolo_elapsed = time.perf_counter() - yolo_start
+    print(f"[TIMING] {frame_name}: YOLO detection took {yolo_elapsed*1000:.1f} ms")
 
     # ========================================================
     # PROCESS RESULTS
@@ -1592,6 +1615,7 @@ def process_tracking_frame(
     # DRAW DETECTION BOXES ON FRAME FOR LIVE DISPLAY
     # ========================================================
     # Draw all detected plate boxes with track IDs
+    draw_start = time.perf_counter()
     for result in results:
         if result.boxes is None or len(result.boxes) == 0:
             continue
@@ -1608,6 +1632,10 @@ def process_tracking_frame(
                     label += " ✓"
                 cv2.putText(frame, label, (x1, max(y1 - 10, 20)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    draw_elapsed = time.perf_counter() - draw_start
+    if frame_number_dummy := 1:
+        pass
+    print(f"[TIMING] {frame_name}: box-drawing took {draw_elapsed*1000:.2f} ms")
 
 
 # ============================================================
@@ -1966,6 +1994,21 @@ elif INPUT_MODE == "webcam":
 
         sys.exit(1)
 
+    # Lower webcam capture resolution to reduce
+    # per-frame processing cost (YOLO + displaying).
+    # Larger frames cost more CPU, which matters
+    # because the OCR worker thread already
+    # competes for the same cores.
+    camera.set(
+        cv2.CAP_PROP_FRAME_WIDTH,
+        640
+    )
+
+    camera.set(
+        cv2.CAP_PROP_FRAME_HEIGHT,
+        480
+    )
+
     print(
         "\nVehicle detection + tracking enabled."
     )
@@ -1995,10 +2038,15 @@ elif INPUT_MODE == "webcam":
     start_ocr_worker()
 
     frame_number = 0
+    loop_start = time.perf_counter()
 
     while True:
 
+        read_start = time.perf_counter()
         ret, frame = camera.read()
+        read_elapsed = time.perf_counter() - read_start
+        if read_elapsed > 0.01:
+            print(f"[TIMING] cam_f{frame_number+1}: camera.read() took {read_elapsed*1000:.1f} ms")
 
         if not ret:
 
@@ -2031,7 +2079,12 @@ elif INPUT_MODE == "webcam":
 
         )
 
+        loop_elapsed = time.perf_counter() - loop_start
+        print(f"[TIMING] cam_f{frame_number}: FULL LOOP iteration took {loop_elapsed*1000:.1f} ms")
+        loop_start = time.perf_counter()
+
         # Check for completed OCR results from worker thread
+        queue_check_start = time.perf_counter()
         while not ocr_result_queue.empty():
             try:
                 track_id, ocr_result, plate, frame_name = ocr_result_queue.get_nowait()
@@ -2041,9 +2094,15 @@ elif INPUT_MODE == "webcam":
                 break
             except Exception as e:
                 print(f"Error handling async OCR result: {e}")
+        queue_check_elapsed = time.perf_counter() - queue_check_start
+        if queue_check_elapsed > 0.001:  # Only log if it took meaningful time
+            print(f"[TIMING] cam_f{frame_number}: queue check + handling took {queue_check_elapsed*1000:.2f} ms")
 
         # Display live feed with detection boxes
+        display_start = time.perf_counter()
         cv2.imshow("SENTRYX - AI-Based Vehicle Authorization Using ALPR", frame)
+        display_elapsed = time.perf_counter() - display_start
+        print(f"[TIMING] cam_f{frame_number}: cv2.imshow took {display_elapsed*1000:.2f} ms")
 
         # Check for 'q' key to exit cleanly
         key = cv2.waitKey(1) & 0xFF

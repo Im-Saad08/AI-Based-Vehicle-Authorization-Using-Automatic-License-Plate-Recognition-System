@@ -1,6 +1,18 @@
 import sys
 import os
 
+# ============================================================
+# LIMIT ONE/DNN/MKL THREADS BEFORE PADDLEOCR LOADS
+# ============================================================
+# oneDNN/mkldnn (used by PaddleOCR) defaults to using ALL
+# CPU cores. This starves the main thread's YOLO inference
+# (also CPU-bound) and causes 5-12s lag spikes.
+# Limit to 2 threads to leave headroom for YOLO (~150ms target).
+os.environ["OMP_NUM_THREADS"] = "2"
+os.environ["MKL_NUM_THREADS"] = "2"
+os.environ["OPENBLAS_NUM_THREADS"] = "2"
+os.environ["NUMEXPR_NUM_THREADS"] = "2"
+
 print("=== OCR WORKER STARTED ===", flush=True)
 
 print(
