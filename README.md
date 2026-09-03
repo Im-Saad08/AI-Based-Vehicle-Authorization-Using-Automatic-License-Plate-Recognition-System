@@ -69,6 +69,15 @@ Registers new authorized vehicles using the same OCR pipeline as live detection.
 
 **Known limitation:** sub-1-second processing is not achievable on CPU-only hardware — each OCR call is inherently ~2-3 seconds on this hardware; a GPU would be required to reach sub-second latency.
 
+## Hardware Comparison (Confirmed)
+
+| Hardware | Webcam Result |
+|---|---|
+| 2-core/4-thread laptop (dev machine) | OCR-burst CPU contention causes 5-12s display lag; root cause confirmed via timing diagnostics, not a code defect |
+| University 6-core PC + A4Tech PK-925H 1080p webcam | No lag observed over 20+ min continuous test; ~98.5% accuracy (informal observation) |
+
+This confirms the webcam lag on the primary dev laptop is a hardware CPU-core limitation, not an architectural or code issue — the same code runs smoothly on adequate hardware.
+
 ## How to Run
 
 **1. Activate environment**
