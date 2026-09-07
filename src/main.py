@@ -74,7 +74,7 @@ from normalize_plate import format_plate_display
 #
 # Change ONLY this variable when changing input type.
 
-INPUT_MODE = "image"
+INPUT_MODE = "webcam"
 #video processing got improved, from processing 10sec/321f in ~1hr to 2 minutes
 
 # ============================================================
@@ -90,7 +90,7 @@ INPUT_MODE = "image"
 # WEBCAM:
 # INPUT_PATH = 0
 
-INPUT_PATH = "img/input/Cars/DSC_0984.JPG"
+INPUT_PATH = 0
 
 
 # ============================================================
