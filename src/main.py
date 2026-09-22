@@ -92,7 +92,6 @@ INPUT_MODE = "webcam"
 
 INPUT_PATH = 0
 
-
 # ============================================================
 # LICENSE PLATE MODEL
 # ============================================================
@@ -291,6 +290,9 @@ OCR_CONFIDENCE_THRESHOLD = 0.50
 # finalizes the track immediately, without waiting for consensus.
 HIGH_CONFIDENCE_ACCEPT = 0.85
 
+# Webcam-calibrated high confidence threshold (640x480 resolution, camera noise)
+WEBCAM_HIGH_CONFIDENCE_ACCEPT = 0.60
+
 MAX_OCR_HISTORY = 10
 
 
@@ -317,6 +319,9 @@ ocr_job_queue = queue.Queue()
 
 # Queue for OCR results: (track_id, ocr_result, plate_info, frame_name)
 ocr_result_queue = queue.Queue()
+
+# Set of track IDs currently undergoing background OCR
+ocr_in_flight = set()
 
 # Worker thread reference
 ocr_worker_thread = None
@@ -560,7 +565,8 @@ def get_consensus_plate(track_id):
 
     history = ocr_history[track_id]
 
-    if len(history) < MIN_OCR_OBSERVATIONS:
+    min_observations = 2 if INPUT_MODE == "webcam" else MIN_OCR_OBSERVATIONS
+    if len(history) < min_observations:
 
         return None
 
@@ -645,9 +651,10 @@ def get_consensus_plate(track_id):
 
     best = candidates[0]
 
+    min_repetitions = 1 if (INPUT_MODE == "webcam" and best["average_confidence"] >= OCR_CONFIDENCE_THRESHOLD) else MIN_PLATE_REPETITIONS
     if (
         best["repetitions"]
-        < MIN_PLATE_REPETITIONS
+        < min_repetitions
     ):
 
         return None
@@ -852,9 +859,11 @@ def handle_async_ocr_result(
         track_id
     )
 
+    accept_threshold = WEBCAM_HIGH_CONFIDENCE_ACCEPT if INPUT_MODE == "webcam" else HIGH_CONFIDENCE_ACCEPT
+
     # High-confidence single-read finalization (Option 1) — runs regardless of consensus
-    if ocr_confidence >= HIGH_CONFIDENCE_ACCEPT:
-        print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {HIGH_CONFIDENCE_ACCEPT} — finalizing immediately (high-confidence bypass).")
+    if ocr_confidence >= accept_threshold:
+        print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {accept_threshold} — finalizing immediately (high-confidence bypass).")
         # Finalize directly without waiting for consensus
         finalized = finalize_vehicle(
             track_id,
@@ -901,11 +910,11 @@ def handle_async_ocr_result(
             "\nNot enough OCR evidence yet."
         )
 
-        # Only stop OCR for very high confidence single reads (>= HIGH_CONFIDENCE_ACCEPT)
-        # Reads between 0.50 and 0.85 continue accumulating for consensus
-        if ocr_confidence >= HIGH_CONFIDENCE_ACCEPT:
+        # Only stop OCR for very high confidence single reads (>= accept_threshold)
+        # Reads between 0.50 and accept_threshold continue accumulating for consensus
+        if ocr_confidence >= accept_threshold:
             track_reached_confidence_threshold.add(track_id)
-            print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {HIGH_CONFIDENCE_ACCEPT}, stopping OCR for this track.")
+            print(f"Track ID {track_id}: OCR confidence {ocr_confidence:.2f} >= {accept_threshold}, stopping OCR for this track.")
 
     return
 
@@ -1135,6 +1144,9 @@ def process_plate(
     if async_mode:
         # Increment call count now (will be accurate even if async)
         ocr_call_count += 1
+        # Track in-flight job to prevent queue spamming
+        if track_id is not None:
+            ocr_in_flight.add(track_id)
         # Submit job to OCR worker queue
         ocr_job_queue.put((track_id, plate_image, plate, image_name))
         print(f"Track ID {track_id}: OCR job queued (async)")
@@ -1587,14 +1599,19 @@ def process_tracking_frame(
                 print(f"Track ID {track_id}: Already has confident OCR result, skipping OCR.")
                 continue
 
+            # In async mode (webcam), skip if an OCR job for this track is already in flight
+            if async_mode and track_id in ocr_in_flight:
+                continue
+
             # Skip OCR if max attempts reached
-            if ocr_attempts_per_track[track_id] >= MAX_OCR_ATTEMPTS_PER_TRACK:
-                print(f"Track ID {track_id}: Max OCR attempts ({MAX_OCR_ATTEMPTS_PER_TRACK}) reached, skipping OCR.")
+            max_attempts = 6 if INPUT_MODE == "webcam" else MAX_OCR_ATTEMPTS_PER_TRACK
+            if ocr_attempts_per_track[track_id] >= max_attempts:
+                print(f"Track ID {track_id}: Max OCR attempts ({max_attempts}) reached, skipping OCR.")
                 continue
 
             # Increment attempt counter
             ocr_attempts_per_track[track_id] += 1
-            print(f"Track ID {track_id}: OCR attempt {ocr_attempts_per_track[track_id]}/{MAX_OCR_ATTEMPTS_PER_TRACK}")
+            print(f"Track ID {track_id}: OCR attempt {ocr_attempts_per_track[track_id]}/{max_attempts}")
 
             # =================================================
             # PROCESS PLATE DIRECTLY
@@ -2088,6 +2105,7 @@ elif INPUT_MODE == "webcam":
         while not ocr_result_queue.empty():
             try:
                 track_id, ocr_result, plate, frame_name = ocr_result_queue.get_nowait()
+                ocr_in_flight.discard(track_id)
                 # Process the OCR result (this handles consensus, finalization, logging)
                 handle_async_ocr_result(track_id, ocr_result, plate, frame_name)
             except queue.Empty:
@@ -2109,6 +2127,17 @@ elif INPUT_MODE == "webcam":
         if key == ord('q'):
             print("\n'q' pressed — exiting webcam mode.")
             break
+
+    # Drain any remaining OCR results from worker thread before shutdown
+    while not ocr_result_queue.empty():
+        try:
+            track_id, ocr_result, plate, frame_name = ocr_result_queue.get_nowait()
+            ocr_in_flight.discard(track_id)
+            handle_async_ocr_result(track_id, ocr_result, plate, frame_name)
+        except queue.Empty:
+            break
+        except Exception as e:
+            print(f"Error draining async OCR result: {e}")
 
     # Stop OCR worker
     stop_ocr_worker()
