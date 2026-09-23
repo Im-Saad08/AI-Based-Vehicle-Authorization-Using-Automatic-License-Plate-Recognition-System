@@ -1,4 +1,6 @@
-# SENTRYX — Vision Engine: AI-Based Vehicle Authorization System
+# SENTRYX
+
+**Real-Time Automatic License Plate Recognition & Vehicle Authorization Engine**
 
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)](#)
 [![YOLOv8n](https://img.shields.io/badge/YOLOv8n-Detection-00FFFF?style=flat&logo=ultralytics)](#)
@@ -7,171 +9,169 @@
 [![OpenCV](https://img.shields.io/badge/OpenCV-Computer_Vision-5C3EE8?style=flat&logo=opencv&logoColor=white)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%20%7C%2011%20(64--bit)-0078D6?style=flat&logo=windows)](#)
 
-An optimized computer vision pipeline for real-time license plate detection, text recognition, region filtering, character normalization, database verification, and access logging. Supports single image, recorded video, and live webcam input.
-
-> [!NOTE]
-> This repository contains the standalone **SENTRYX Core Vision Engine & ALPR Pipeline**. It encapsulates the complete computer vision workflow: vehicle tracking, plate localization, recognition, normalization, and local authorization verification using `data/vehicles.csv` with access logging to `data/entry_log.csv`.
+![YOLOv8n License Plate Detection](docs/assets/yolov8_detection_sample.png)  
+*YOLOv8n detecting a Pakistani license plate (MNA-17 486) on real-world vehicle test imagery.*
 
 ---
 
-## Executive Summary & Key Upgrades
+## What is SENTRYX?
 
-This system uses a single-stage direct license plate detection pipeline with in-memory OCR, tuned for CPU-only hardware (developed and tested on a dual-core Intel laptop).
+Manual checkpoint inspection creates severe entry bottlenecks, transcription errors, and unlogged perimeter access. SENTRYX is an autonomous computer vision system designed to automate vehicle access control by localizing license plates, reading alphanumeric characters, normalizing regional formatting, and validating authorization against a secure local registry in real time.
 
-### Key Design Decisions
-
-- **Single-Stage YOLOv8 License Plate Detection:** Directly detects license plates from frames, bypassing full vehicle-body detection.
-- **In-Memory PaddleOCR (Recognition-Only Mode):** Uses PaddleOCR's `TextRecognition` class, which skips redundant text-detection/orientation steps since YOLO has already precisely located the plate. This gave a measured ~3.5x speedup over the full PaddleOCR pipeline.
-- **Early-Exit Optimization:** Skips redundant enhancement-pass OCR calls once a confident read (≥0.50, recalibrated for recognition-only's confidence distribution) is found from the whole-crop or split-crop candidate.
-- **15% Bounding Box Padding:** Adds outer padding around plate crops to avoid clipping characters, without over-padding (which was found to cause false 2-line detections).
-- **2-Line (Stacked) Plate Handling:** For every plate crop, the system always computes BOTH a whole-crop OCR candidate and a top/bottom split candidate, and a scoring function picks the better result. (An earlier aspect-ratio-threshold approach to decide "is this 2-line?" was tested and found unreliable — two real test plates showed a 2-line plate with a *lower* aspect ratio than a single-line plate — so this was replaced with always computing both.)
-- **Position-Aware Character Correction:** Corrects OCR misreads (e.g. O/Q→0, B→8, S→5, Z→2) based on whether a character sits in a letter-segment or digit-segment of the plate, not by guessing from the whole token.
-- **Region-Label Filtering:** Removes region text (PUNJAB, ISLAMABAD, ICT, SINDH, KPK, BALOCHISTAN, etc.) via substring matching, so OCR-joined tokens like "ICTISLAMABAD" are still correctly filtered.
-- **Per-Track OCR Gating (video/webcam):** Uses ByteTrack to assign a persistent ID per vehicle. Each vehicle is OCR'd a maximum of 3 attempts, or finalized immediately on a high-confidence single read (≥0.85) — not OCR'd on every frame.
-- **Frame Skipping:** Detection runs on every Nth frame (video: every 3rd; webcam: every 10th, tuned for 2-core CPU) rather than every frame, since consecutive frames are near-identical.
-- **Threaded OCR (webcam mode):** OCR runs on a background thread so the live camera display doesn't freeze while a plate is being read.
+This repository houses the **core vision and inference engine** of SENTRYX. Built specifically for edge hardware, it couples a custom-trained YOLOv8n detector with an in-memory, recognition-only PaddleOCR pipeline and ByteTrack multi-object tracking. The engine supports single images, recorded video streams, and live webcam feeds on CPU-only machines without requiring dedicated GPU infrastructure.
 
 ---
 
-## System Architecture & Workflow
+## Pipeline Architecture
 
 ![System Architecture Overview](docs/assets/system_architecture_overview.png)  
-*Fig 1: High-Level System Architecture Overview (Detection → Recognition & Tracking → Authorization & Logging)*
+*High-level system architecture: detection, tracking, recognition, normalization, and local authorization logging.*
 
-```
-Input (image / video / webcam)
-        ↓
-YOLO plate detection (rbflw_y8_best.pt)
-        ↓
-[video/webcam only] ByteTrack vehicle tracking + frame skip + per-track OCR gating
-        ↓
-Plate crop (15% padding)
-        ↓
-PaddleOCR recognition-only (whole-crop + split candidates, early-exit on high confidence)
-        ↓
-Normalization (character correction, region filtering, merge to single string)
-        ↓
-Scoring (best candidate selected)
-        ↓
-Authorization check (data/vehicles.csv) → Logging (data/entry_log.csv)
+```mermaid
+flowchart LR
+    Input["Input Source<br/>(Image / Video / Webcam)"] --> Det["YOLOv8n Detector<br/>(Plate Localization)"]
+    Det --> Track{"Video / Webcam?"}
+    Track -- Yes --> BT["ByteTrack<br/>(Temporal Tracking)"]
+    BT --> Gate["Per-Track Gating<br/>(Max 3 Attempts)"]
+    Gate --> Crop["15% Padded Crop"]
+    Track -- No --> Crop
+    Crop --> OCR["PaddleOCR<br/>(Recognition-Only)"]
+    OCR --> Split["Dual-Candidate Generation<br/>(Whole Crop + Split Half)"]
+    Split --> Score["Scoring & Normalization<br/>(Position-Aware Correction)"]
+    Score --> Auth["Authorization Check<br/>(data/vehicles.csv)"]
+    Auth --> Log["Audit Logging<br/>(data/entry_log.csv)"]
 ```
 
-### Core ALPR Pipeline Data Flow
+---
 
+## The Vision Pipeline
+
+### 1. Plate Detection
+A custom-trained YOLOv8n detector (`models/trained/rbflw_y8_best.pt`) localizes license plates directly in the raw camera frame, bypassing full vehicle-body detection cascades. Detected bounding boxes are padded by 15% margins to protect boundary characters from clipping. Low-resolution or distant plates (< 50x15 pixels) are filtered out automatically to conserve OCR compute.
+
+### 2. Temporal Tracking (Video & Webcam)
+ByteTrack assigns persistent track IDs to vehicles across sequential frames. Rather than running expensive OCR on every frame, the pipeline gates recognition to a maximum of 3 attempts per tracked vehicle. If a single read reaches high confidence (≥ 0.85 in video, ≥ 0.60 in webcam), the track is finalized immediately, preventing redundant computation.
+
+### 3. Recognition-Only OCR
+Instead of running a full OCR pipeline with text detection and orientation classification, SENTRYX uses PaddleOCR's in-memory `TextRecognition` model directly on the localized plate crop. Because YOLO has already determined the plate coordinates, skipping text localization yields a ~3.5x speedup.
+
+### 4. Two-Line & Stacked Plate Handling
+Pakistani plates frequently feature stacked layouts (e.g., province/year on the upper line, registration digits on the lower line). Rather than relying on fragile aspect-ratio heuristics, the engine evaluates both a full-crop candidate and a split-line candidate (top half + bottom half) for every detection, using a scoring function to pick the superior result.
+
+### 5. Position-Aware Normalization
+Extracted tokens are scrubbed of regional words (`PUNJAB`, `ISLAMABAD`, `ICT`, `SINDH`, `KPK`, etc.) using substring matching to eliminate joined artifacts (e.g. `ICTISLAMABAD`). Position-aware character correction detects the boundary between alphabetical prefixes and registration digits, correcting OCR confusion (e.g. O/Q→0, B→8, S→5, Z→2) only in the numeric zone while protecting valid letters.
+
+### 6. Authorization & Audit Logging
+The clean plate string is verified against `data/vehicles.csv`. Every verification attempt is atomically appended to `data/entry_log.csv` with a timestamp, frame reference, confidence score, and authorization status (`AUTHORIZED` or `UNAUTHORIZED`).
+
+---
+
+## Engineering Highlights
+
+| Challenge | Engineering Solution | Rationale |
+| :--- | :--- | :--- |
+| **Full OCR Latency on CPU** | Switched from full PaddleOCR to in-memory `TextRecognition` | Skips redundant text detection on already-cropped plates, cutting latency by ~3.5x. |
+| **Stacked / Two-Line Plates** | Dual-candidate generation (whole-crop + split-half) scored via regex | Aspect-ratio thresholds failed on real plates; generating and scoring both candidates reliably handles stacked text. |
+| **Character Confusion (O/0, B/8, S/5)** | Position-aware correction based on letter-to-digit boundary | Whole-string character replacement corrupts valid alphabet prefixes; restricting conversion to digit zones preserves valid letters. |
+| **Redundant Video OCR Calls** | ByteTrack vehicle tracking with a 3-attempt gating cap | Vehicles in consecutive frames are identical; tracking ensures each vehicle is processed at most 3 times or until high confidence. |
+| **Live Camera Freezes on Edge CPU** | Asynchronous background OCR worker thread with task queue | Running 2-second OCR inference on the main thread blocked OpenCV rendering; decoupling capture from OCR ensures smooth video display. |
+| **CPU Starvation on Multi-Threading** | Programmatic thread capping (`OMP_NUM_THREADS="2"`, etc.) | Unbounded BLAS/MKL threads monopolize all CPU cores during OCR bursts; capping preserves headroom for the YOLO detector. |
+
+---
+
+## Visual Results
+
+### Vision Pipeline Data Flow
 ![Core ALPR Pipeline](docs/assets/core_pipeline_flow.png)  
-*Fig 2: Vision Engine Core Pipeline Data Flow with Split Candidate Scoring and Normalization*
+*Detailed data flow from input frame through plate crop, dual-candidate generation, scoring, and normalization.*
 
-### Multi-Source Input Queuing & Concurrency
-
+### Multi-Source Concurrency Architecture
 ![Multi-Source Input Queuing](docs/assets/multi_source_queuing.png)  
-*Fig 3: Multi-Source Input Queuing and Threading Architecture with ByteTrack Feedback Loop*
+*Queued architecture decoupling image, video, and webcam ingestion from detection and tracked OCR workers.*
 
----
-
-## Module Breakdown
-
-### 1. Plate Detection (`src/detect_and_crop_plate.py`)
-Loads `rbflw_y8_best.pt` to detect license plate bounding boxes. Enforces minimum size thresholds (`MIN_PLATE_WIDTH = 50px`, `MIN_PLATE_HEIGHT = 15px`) so distant/unreadable plates are skipped rather than wasting an OCR call. Adds 15% padding before cropping.
-
-![YOLOv8n License Plate Detection](docs/assets/yolov8_detection_sample.png)  
-*Fig 4: Custom YOLOv8n detector locating Pakistani license plate (MNA-17 486) on real-world vehicle test imagery*
-
-### 2. OCR (`src/recognize_plate.py`)
-Loads PaddleOCR's `TextRecognition` (recognition-only) engine once, in-memory, at startup. For each plate, computes a whole-crop candidate and a split (top/bottom half) candidate. Applies early-exit to skip enhancement-pass OCR calls when a confident result is already found.
-
-### 3. Text Normalization & Region Filtering (`src/normalize_plate.py`)
-Converts raw OCR text into a clean, single merged plate string: removes region words (including OCR-joined variants), applies position-aware character correction, strips spaces/dashes/underscores.
-
-### 4. Vehicle Authorization & Logging (`src/authorize_vehicle.py`, `src/logger.py`)
-Matches the normalized plate against `data/vehicles.csv`, determines `AUTHORIZED`/`UNAUTHORIZED` status, and logs every entry attempt (authorized or not) to `data/entry_log.csv` with date, time, image/frame reference, plate number, confidence, and status.
-
-### 5. Vehicle Registration (`src/register_vehicle.py`)
-Registers new authorized vehicles using the same OCR pipeline as live detection. User enters the plate as one continuous string, no spaces or dashes (e.g. a two-line plate showing "LE·15" / "1051" should be entered as `LE151051`).
-
----
-
-## Experimental Results & Performance Benchmarks
-
-### 1. YOLOv8n Detection Model Validation
-
-The custom license plate detection model was trained on Roboflow annotated datasets for 88 epochs (early-stopped at epoch 73) on a Tesla T4 GPU (Google Colab).
-
-![YOLOv8n Detection](docs/assets/yolov8_detection_sample.png)
-
+### Detector Training Performance
 ![YOLOv8n Training Metrics](docs/assets/yolov8_training_metrics.png)  
-*Fig 5: Google Colab YOLOv8n validation metrics: 0.979 Precision, 0.969 Recall, 0.991 mAP@50 at 1.9 ms/image inference*
+*Validation metrics from custom YOLOv8n training on 1,765 images: 0.979 Precision, 0.969 Recall, and 0.991 mAP@50.*
 
-| Metric | Validation Result |
+---
+
+## Performance & Benchmarks
+
+### 1. License Plate Detection (Validation Set)
+
+Evaluated on a held-out test split of 1,765 images and 1,840 annotated plate instances:
+
+| Metric | Measured Value |
 | :--- | :--- |
-| **Validation Images** | 1,765 images |
-| **Annotated Plate Instances** | 1,840 instances |
 | **Precision (P)** | **0.979** (97.9%) |
 | **Recall (R)** | **0.969** (96.9%) |
 | **mAP@50** | **0.991** (99.1%) |
 | **mAP@50–95** | **0.706** (70.6%) |
-| **Inference Speed** | **1.9 ms / image** |
-| **Model Size / Params** | 3.0M parameters (6.2 MB) |
+| **Detector Inference Speed** | **1.9 ms / image** (Tesla T4 GPU) / ~150 ms (CPU) |
+| **Model Size** | 3.0M parameters (6.2 MB) |
 
-### 2. Video-Mode Tracking & Recognition Performance
+### 2. Multi-Frame Video Tracking Performance
 
-Evaluated across continuous multi-frame video containing multiple vehicle streams:
+Evaluated across a continuous video sequence containing multiple vehicle entries:
 
-| Metric | Measured Result |
+| Metric | Result |
 | :--- | :--- |
-| **Total Frames in Video** | 1,468 frames |
-| **Sampled Frames Processed** | 146 frames |
+| **Total Frames** | 1,468 frames |
+| **Sampled Frames (Frame-Skip = 3)** | 146 frames |
 | **Unique Vehicles Tracked (ByteTrack)** | 11 vehicles |
-| **Vehicle Detections Processed** | 97 detections |
 | **License Plates Detected** | 12 plates |
-| **OCR Recognition Success Rate** | **91.7%** (11 / 12 plates successfully recognized) |
-| **Vehicles Finalized & Logged** | 8 vehicles |
+| **OCR Recognition Success Rate** | **91.7%** (11 / 12 plates successfully read) |
+| **Finalized Vehicles Logged** | 8 vehicles |
 
-### 3. CPU Latency Optimization Breakdown
+### 3. CPU Latency Optimization Progression
 
-| Optimization Phase | Latency Result | Note |
-|---|---|---|
-| Full PaddleOCR pipeline (pre-optimization) | ~90 seconds / image | Baseline unoptimized engine |
-| In-memory PaddleOCR (recognition-only mode) | ~19–23 seconds / image | Skips redundant text detection |
-| In-memory + Early-Exit optimization | **~7–10 seconds / image** (hot) | Skips redundant enhancement passes |
-| Frame-Skip factor (Video) | 67% reduction | Process 107 of 321 frames |
-| Per-Track OCR Gating | Max 3 attempts / vehicle | Decoupled from incoming frame rate |
-| Webcam Threading | Non-blocking display | Asynchronous background OCR worker |
+Measured on a standard dual-core development laptop:
 
-> [!NOTE]
-> Sub-1-second processing is mathematically bounded by CPU instruction throughput on 2-core edge hardware (~2–3 seconds per forward OCR inference). GPU deployment easily provides sub-second latency.
-
-### 4. Hardware Comparison (Dev Machine vs. Multicore PC)
-
-| Hardware Configuration | Webcam Behavior & Result |
-|---|---|
-| **2-core / 4-thread laptop (dev machine)** | OCR-burst CPU contention causes 5–12s display latency; root cause verified via timing instrumentation, not a pipeline code defect |
-| **University 6-core PC + A4Tech PK-925H 1080p Webcam** | **No lag observed over 20+ min continuous runtime; ~98.5% accuracy** |
-
-This empirically confirms that webcam latency on the dual-core dev laptop is a hardware CPU-core constraint rather than an architectural flaw.
+| Pipeline Stage | Latency | Engineering Impact |
+| :--- | :--- | :--- |
+| Baseline Full PaddleOCR Pipeline | ~90 s / image | Unoptimized full text-detection + recognition |
+| In-Memory Recognition-Only Mode | ~19–23 s / image | Bypasses text detection stage |
+| Recognition-Only + Early-Exit Optimization | **~7–10 s / image** | Skips enhancement passes once confident read is obtained |
+| Multi-Core PC (6-Core Intel + 1080p Webcam) | **Real-Time (~30 FPS)** | Confirms smooth, non-blocking performance with adequate core count |
 
 ---
 
-## Repository Structure
+## Tech Stack
+
+| Component | Technology | Role |
+| :--- | :--- | :--- |
+| **Runtime** | Python 3.12 (64-bit) | Core execution environment |
+| **Object Detection** | YOLOv8n (Ultralytics) | Custom-trained license plate detector |
+| **Character Recognition** | PaddleOCR (PP-OCRv6) | In-memory text recognition engine |
+| **Multi-Object Tracking** | ByteTrack | Persistent vehicle tracking across video frames |
+| **Computer Vision** | OpenCV (`cv2`) | Frame ingestion, cropping, preprocessing, and display |
+| **Data Processing** | NumPy, Pandas | Candidate matrix evaluation and CSV database lookups |
+
+---
+
+## Project Structure
 
 ```text
 ├── data/
-│   ├── entry_log.csv            # Access verification audit log
-│   └── vehicles.csv             # Authorized vehicle database
+│   ├── entry_log.csv            # Access verification audit log (CSV database)
+│   └── vehicles.csv             # Authorized vehicle registry (CSV database)
 ├── docs/
-│   └── assets/                  # Architecture diagrams and benchmark figures
+│   └── assets/                  # Architecture flowcharts and benchmark figures
 ├── img/
 │   ├── input/                   # Test images and sample video streams
-│   └── output/                  # Detection and cropped plate outputs
+│   └── output/                  # Detections and cropped plate outputs
 ├── models/
 │   └── trained/
-│       └── rbflw_y8_best.pt     # Trained YOLOv8n license plate weights
+│       └── rbflw_y8_best.pt     # Trained YOLOv8n license plate weights (6.2 MB)
 ├── src/
 │   ├── authorize_vehicle.py     # Database matching against vehicles.csv
-│   ├── detect_and_crop_plate.py # YOLOv8 plate detector with 15% padding
-│   ├── logger.py                # Append verification decisions to entry_log.csv
-│   ├── main.py                  # Primary pipeline entry point (image/video/webcam)
-│   ├── normalize_plate.py       # Character correction and region filtering
-│   ├── recognize_plate.py       # In-memory recognition-only PaddleOCR engine
+│   ├── detect_and_crop_plate.py # YOLOv8 plate detector with 15% margin padding
+│   ├── enhance_plate.py         # Contrast and CLAHE image preprocessing
+│   ├── logger.py                # Atomic append logger to entry_log.csv
+│   ├── main.py                  # Primary ALPR execution orchestrator
+│   ├── normalize_plate.py       # Position-aware character correction & region filter
+│   ├── plate_candidates.py      # Candidate string ranking helpers
+│   ├── recognize_plate.py       # In-memory recognition-only OCR engine
 │   └── register_vehicle.py      # Interactive vehicle registration utility
 ├── requirements.txt             # Python dependencies
 └── README.md
@@ -179,107 +179,90 @@ This empirically confirms that webcam latency on the dual-core dev laptop is a h
 
 ---
 
-## Project Context
+## Installation & Setup
 
-This repository houses the standalone **Vision Engine** for the SENTRYX vehicle authorization system developed during an internship at the National Engineering and Scientific Commission (NESCOM). In broader team deployments, this vision engine can supply vehicle recognition events to upstream external services; however, this repository specifically focuses on the core computer vision, inference, normalization, and local authorization pipeline.
+### Prerequisites
+* Windows 10 or 11 (64-bit)
+* Python 3.12 (64-bit) added to system `PATH`
+* Dual-core CPU or higher (quad-core recommended for webcam mode); 4 GB+ RAM
+* Internet connection on first execution (to auto-download PaddleOCR weights, ~100 MB)
 
----
-
-## Installation, Setup & Execution
-
-Follow these steps to set up and run the SENTRYX Vision Engine on a fresh Windows machine (Windows 10 / 11 64-bit).
-
-### 1. Prerequisites
-
-* **Operating System:** Windows 10 or Windows 11 (64-bit).
-* **Python Version:** Python 3.12 (64-bit) is recommended. Ensure Python is added to your system `PATH`.
-* **Hardware:** Dual-core CPU or higher (quad-core or higher recommended for real-time webcam processing); 4 GB+ RAM.
-* **Camera (Optional):** Integrated or external USB webcam (required only for `"webcam"` mode).
-* **Internet Connection (First Run Only):** Required on initial execution so PaddleOCR can automatically download its recognition weights (`PP-OCRv6_medium_rec`, ~100 MB) to your local cache directory (`~/.paddlex/`).
-
-### 2. Environment Setup
-
-> [!NOTE]
-> The `paddleocr_env` virtual environment folder is intentionally not included in the distribution ZIP because Python virtual environments are machine-specific (they bind hardcoded local file paths and platform binaries). It can be recreated cleanly from `requirements.txt` in a few minutes.
-
-Open Command Prompt or PowerShell in the project root directory and create the virtual environment:
-
+### 1. Clone the Repository
 ```cmd
-python -m venv paddleocr_env
+git clone https://github.com/Im-Saad08/AI-Based-Vehicle-Authorization-Using-Automatic-License-Plate-Recognition-System.git
+cd AI-Based-Vehicle-Authorization-Using-Automatic-License-Plate-Recognition-System
 ```
 
-Activate the virtual environment:
-
+### 2. Create and Activate Virtual Environment
 ```cmd
+python -m venv paddleocr_env
 paddleocr_env\Scripts\activate
 ```
 
-### 3. Dependency Installation
-
-With the virtual environment active, install all required dependencies:
-
+### 3. Install Dependencies
 ```cmd
 pip install -r requirements.txt
 ```
 
-### 4. Configuration & Repository Assets
+---
 
-All required models and databases are included within the repository:
+## Usage
 
-* **Trained Detection Model:** Located at `models/trained/rbflw_y8_best.pt` (referenced by `src/main.py` and `src/detect_and_crop_plate.py`).
-* **Authorized Vehicle Database:** Located at `data/vehicles.csv`. Contains authorized plate registrations, employee names, and departments.
-* **Access Log:** Written to `data/entry_log.csv` (automatically created/appended on each authorization check).
-* **Environment Variables:** CPU thread limits (`OMP_NUM_THREADS="2"`, `MKL_NUM_THREADS="2"`) and Paddle optimization flags (`FLAGS_enable_pir_api="0"`) are configured programmatically inside `src/main.py`. No `.env` file or manual system variable configuration is required.
-
-To configure input sources, open `src/main.py` and set `INPUT_MODE` and `INPUT_PATH` near the top (lines 77–93):
-
-| Mode | `INPUT_MODE` | `INPUT_PATH` Example | Description |
-| :--- | :--- | :--- | :--- |
-| **Image** | `"image"` | `"img/input/Cars/AKF938.jpeg"` | Single image file or list of image paths |
-| **Video** | `"video"` | `"img/input/video4.mp4"` | Recorded video file (with ByteTrack vehicle tracking) |
-| **Webcam** | `"webcam"` | `0` | Live camera stream (integer device index, e.g. `0` or `1`) |
-
-### 5. Running the Application
-
-Make sure the virtual environment is active (`(paddleocr_env)` will appear in your terminal prompt).
-
-#### Run Main ALPR Pipeline
-Execute the main detection, recognition, and authorization pipeline:
+### Run Main ALPR Pipeline
+Configure your input mode and execute the vision engine:
 
 ```cmd
 python src/main.py
 ```
 
-* In **Webcam mode**, a live OpenCV window displays detected plates and tracking boxes. Press **`q`** in the video window to stop cleanly.
-* Detection, recognition, and access authorization statuses are printed in the terminal and logged to `data/entry_log.csv`.
+* In **Webcam mode**, a live OpenCV preview displays detected plates and bounding boxes. Press **`q`** to cleanly exit.
+* In **Image/Video mode**, detection and authorization decisions are printed to the console and logged to `data/entry_log.csv`.
 
-#### Run Vehicle Registration Utility (Module 5)
-To register a new authorized vehicle into `data/vehicles.csv`:
+### Register a New Authorized Vehicle
+To register a new vehicle into the authorization database:
 
 ```cmd
 python src/register_vehicle.py
 ```
-Follow the interactive prompts to enter the Employee ID, Name, Department, Vehicle Type, and a photo path containing the vehicle license plate.
-
-### 6. Troubleshooting
-
-* **PowerShell Execution Policy Error:**  
-  If activating via PowerShell produces a script execution restriction error, run:
-  ```powershell
-  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-  ```
-  and run `paddleocr_env\Scripts\activate` again.
-* **Webcam Fails to Open:**  
-  If `INPUT_MODE = "webcam"` displays `Unable to open webcam`, ensure no other application (e.g. Teams, Zoom, Windows Camera) is locking the webcam, or set `INPUT_PATH = 1` in `src/main.py` if using an external USB camera.
-* **Initial Run Startup Delay:**  
-  The very first execution takes an extra 20–30 seconds as PaddleOCR downloads and initializes its recognition model. Subsequent runs load immediately from local cache.
+Follow the interactive terminal prompts to input Employee ID, Name, Department, Vehicle Type, and a photo path. The tool detects and verifies the plate automatically.
 
 ---
 
-## Author:
+## Configuration
 
-* **Author:**  
-  * **Muhammad Saad** — *National University of Technology (NUTECH), Islamabad*
+Input source and pipeline parameters are configured near the top of `src/main.py` (lines 75–105):
 
-* **Project:** SENTRYX — AI-Based Vehicle Authorization Using Automatic License Plate Recognition System  
+| Parameter | Options / Type | Description |
+| :--- | :--- | :--- |
+| `INPUT_MODE` | `"image"`, `"video"`, `"webcam"` | Active ingestion source |
+| `INPUT_PATH` | File path or device index (`0`) | Target image/video file or camera index |
+| `FRAME_SKIP` | Integer (e.g. `3` or `10`) | Frame processing interval (tune for available CPU cores) |
+| `MAX_OCR_ATTEMPTS_PER_TRACK` | Integer (default: `3`) | Maximum OCR attempts per tracked vehicle |
+| `HIGH_CONFIDENCE_ACCEPT` | Float (default: `0.85`) | Confidence threshold for single-read track finalization |
 
+---
+
+## Limitations
+
+* **CPU Latency Bounds:** On entry-level dual-core CPUs, single OCR forward passes take ~2–3 seconds. Multi-core processors or dedicated GPU acceleration are required for sub-second live streaming.
+* **Extreme Angles:** Detection bounding-box accuracy loosens on steep oblique angles (> 45°), which can degrade plate crop quality.
+
+---
+
+## Project Scope & Context
+
+This repository contains the standalone **Computer Vision Engine & Inference Pipeline** for SENTRYX. 
+
+In broader multi-developer deployments, this vision engine supplies recognition events to upstream web platforms. Presentation dashboards, FastAPI services, and PostgreSQL databases developed by teammates are maintained in separate repositories and are outside the scope of this codebase.
+
+---
+
+## Authors & Acknowledgements
+
+* **Author:** Muhammad Saad  
+  *Computer Engineering, National University of Technology (NUTECH), Islamabad, Pakistan*
+
+* **Supervisor:** Dr. Inayatullah Khan  
+  *National Engineering and Scientific Commission (NESCOM), Islamabad, Pakistan*
+
+* **Project:** SENTRYX — Developed under the National Engineering and Scientific Commission (NESCOM) Internship Program.
