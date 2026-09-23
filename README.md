@@ -24,9 +24,6 @@ This repository houses the **core vision and inference engine** of SENTRYX. Buil
 
 ## Pipeline Architecture
 
-![System Architecture Overview](docs/assets/system_architecture_overview.png)  
-*High-level system architecture: detection, tracking, recognition, normalization, and local authorization logging.*
-
 ```mermaid
 flowchart LR
     Input["Input Source<br/>(Image / Video / Webcam)"] --> Det["YOLOv8n Detector<br/>(Plate Localization)"]
@@ -41,6 +38,8 @@ flowchart LR
     Score --> Auth["Authorization Check<br/>(data/vehicles.csv)"]
     Auth --> Log["Audit Logging<br/>(data/entry_log.csv)"]
 ```
+
+*High-level system architecture: detection, tracking, recognition, normalization, and local authorization logging.*
 
 ---
 
@@ -149,36 +148,6 @@ Measured on a standard dual-core development laptop:
 
 ---
 
-## Project Structure
-
-```text
-├── data/
-│   ├── entry_log.csv            # Access verification audit log (CSV database)
-│   └── vehicles.csv             # Authorized vehicle registry (CSV database)
-├── docs/
-│   └── assets/                  # Architecture flowcharts and benchmark figures
-├── img/
-│   ├── input/                   # Test images and sample video streams
-│   └── output/                  # Detections and cropped plate outputs
-├── models/
-│   └── trained/
-│       └── rbflw_y8_best.pt     # Trained YOLOv8n license plate weights (6.2 MB)
-├── src/
-│   ├── authorize_vehicle.py     # Database matching against vehicles.csv
-│   ├── detect_and_crop_plate.py # YOLOv8 plate detector with 15% margin padding
-│   ├── enhance_plate.py         # Contrast and CLAHE image preprocessing
-│   ├── logger.py                # Atomic append logger to entry_log.csv
-│   ├── main.py                  # Primary ALPR execution orchestrator
-│   ├── normalize_plate.py       # Position-aware character correction & region filter
-│   ├── plate_candidates.py      # Candidate string ranking helpers
-│   ├── recognize_plate.py       # In-memory recognition-only OCR engine
-│   └── register_vehicle.py      # Interactive vehicle registration utility
-├── requirements.txt             # Python dependencies
-└── README.md
-```
-
----
-
 ## Installation & Setup
 
 ### Prerequisites
@@ -257,12 +226,8 @@ In broader multi-developer deployments, this vision engine supplies recognition 
 
 ---
 
-## Authors & Acknowledgements
+## Author
 
-* **Author:** Muhammad Saad  
+* Muhammad Saad  
   *Computer Engineering, National University of Technology (NUTECH), Islamabad, Pakistan*
 
-* **Supervisor:** Dr. Inayatullah Khan  
-  *National Engineering and Scientific Commission (NESCOM), Islamabad, Pakistan*
-
-* **Project:** SENTRYX — Developed under the National Engineering and Scientific Commission (NESCOM) Internship Program.
