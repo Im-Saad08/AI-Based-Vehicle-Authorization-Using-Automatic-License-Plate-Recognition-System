@@ -276,17 +276,10 @@ Follow the interactive prompts to enter the Employee ID, Name, Department, Vehic
 
 ---
 
-## Authors, Supervision & Affiliation
-
-* **Supervisor:** Dr. Inayatullah Khan  
-  *National Engineering and Scientific Commission (NESCOM), Islamabad, Pakistan*
+## Author:
 
 * **Author:**  
   * **Muhammad Saad** — *National University of Technology (NUTECH), Islamabad*
 
-* **Team Collaborators (SENTRYX System):**  
-  * Shahid Manzoor — *National University of Technology (NUTECH), Islamabad*  
-  * Rana Ashhad — *National University of Technology (NUTECH), Islamabad*
-
 * **Project:** SENTRYX — AI-Based Vehicle Authorization Using Automatic License Plate Recognition System  
-* **Host Organization:** National Engineering and Scientific Commission (NESCOM)
+
