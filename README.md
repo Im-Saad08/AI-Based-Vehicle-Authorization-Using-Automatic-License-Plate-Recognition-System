@@ -7,7 +7,7 @@
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-PP--OCRv6-2962FF?style=flat)](#)
 [![ByteTrack](https://img.shields.io/badge/ByteTrack-Vehicle_Tracking-blueviolet?style=flat)](#)
 [![OpenCV](https://img.shields.io/badge/OpenCV-Computer_Vision-5C3EE8?style=flat&logo=opencv&logoColor=white)](#)
-[![Platform](https://img.shields.io/badge/Platform-Windows_10%20%7C%2011%20(64--bit)-0078D6?style=flat&logo=windows)](#)
+[![Platform](https://img.shields.io/badge/Platform-Windows_10%20%7C%2011%20%2864--bit%29-0078D6?style=flat&logo=windows)](#)
 
 ![YOLOv8n License Plate Detection](docs/assets/yolov8_detection_sample.png)  
 *YOLOv8n detecting a Pakistani license plate (MNA-17 486) on real-world vehicle test imagery.*
