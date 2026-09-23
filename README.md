@@ -1,22 +1,18 @@
-<div align="center">
-  <img src="docs/assets/nescom_logo.png" alt="NESCOM Emblem" width="160"/>
-  <h1>SENTRYX</h1>
-  <p><strong>AI-Based Vehicle Authorization System Using Automatic License Plate Recognition (ALPR)</strong></p>
-  <p><em>National Engineering and Scientific Commission (NESCOM) Internship Project</em></p>
-  <p>
-    <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white" alt="Python 3.12"/>
-    <img src="https://img.shields.io/badge/YOLOv8n-Detection-00FFFF?style=flat&logo=ultralytics" alt="YOLOv8"/>
-    <img src="https://img.shields.io/badge/PaddleOCR-PP--OCRv6-2962FF?style=flat" alt="PaddleOCR"/>
-    <img src="https://img.shields.io/badge/ByteTrack-Vehicle_Tracking-blueviolet?style=flat" alt="ByteTrack"/>
-    <img src="https://img.shields.io/badge/FastAPI-REST_Backend-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/badge/PostgreSQL-Neon_Cloud-4169E1?style=flat&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
-    <img src="https://img.shields.io/badge/Platform-Windows_10%20%7C%2011%20(64--bit)-0078D6?style=flat&logo=windows" alt="Windows"/>
-  </p>
-</div>
+# SENTRYX — Vision Engine: AI-Based Vehicle Authorization System
+
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)](#)
+[![YOLOv8n](https://img.shields.io/badge/YOLOv8n-Detection-00FFFF?style=flat&logo=ultralytics)](#)
+[![PaddleOCR](https://img.shields.io/badge/PaddleOCR-PP--OCRv6-2962FF?style=flat)](#)
+[![ByteTrack](https://img.shields.io/badge/ByteTrack-Vehicle_Tracking-blueviolet?style=flat)](#)
+[![OpenCV](https://img.shields.io/badge/OpenCV-Computer_Vision-5C3EE8?style=flat&logo=opencv&logoColor=white)](#)
+[![Platform](https://img.shields.io/badge/Platform-Windows_10%20%7C%2011%20(64--bit)-0078D6?style=flat&logo=windows)](#)
+
+An optimized computer vision pipeline for real-time license plate detection, text recognition, region filtering, character normalization, database verification, and access logging. Supports single image, recorded video, and live webcam input.
+
+> [!NOTE]
+> This repository contains the standalone **SENTRYX Core Vision Engine & ALPR Pipeline**. It encapsulates the complete computer vision workflow: vehicle tracking, plate localization, recognition, normalization, and local authorization verification using `data/vehicles.csv` with access logging to `data/entry_log.csv`.
 
 ---
-
-An optimized AI Vehicle Authorization System for real-time license plate detection, text recognition, region filtering, character normalization, database verification, and access logging. Supports single image, recorded video, and live webcam input.
 
 ## Executive Summary & Key Upgrades
 
@@ -39,11 +35,8 @@ This system uses a single-stage direct license plate detection pipeline with in-
 
 ## System Architecture & Workflow
 
-<p align="center">
-  <img src="docs/assets/system_architecture_overview.png" alt="System Architecture Overview" width="95%"/>
-  <br/>
-  <em>Fig 1: High-Level System Architecture Overview (Detection → Recognition & Tracking → Authorization & Logging → Presentation)</em>
-</p>
+![System Architecture Overview](docs/assets/system_architecture_overview.png)  
+*Fig 1: High-Level System Architecture Overview (Detection → Recognition & Tracking → Authorization & Logging)*
 
 ```
 Input (image / video / webcam)
@@ -60,42 +53,39 @@ Normalization (character correction, region filtering, merge to single string)
         ↓
 Scoring (best candidate selected)
         ↓
-Authorization check (vehicles.csv / PostgreSQL) → Logging (entry_log.csv / access_logs)
+Authorization check (data/vehicles.csv) → Logging (data/entry_log.csv)
 ```
 
-<p align="center">
-  <img src="docs/assets/core_pipeline_flow.png" alt="Core Pipeline Data Flow" width="90%"/>
-  <br/>
-  <em>Fig 2: Vision Engine Core Pipeline Data Flow with Split Candidate Scoring and Normalization</em>
-</p>
+### Core ALPR Pipeline Data Flow
 
-<p align="center">
-  <img src="docs/assets/multi_source_queuing.png" alt="Multi-Source Input Queuing Diagram" width="90%"/>
-  <br/>
-  <em>Fig 3: Multi-Source Input Queuing and Threading Architecture with ByteTrack Feedback Loop</em>
-</p>
+![Core ALPR Pipeline](docs/assets/core_pipeline_flow.png)  
+*Fig 2: Vision Engine Core Pipeline Data Flow with Split Candidate Scoring and Normalization*
 
-### Module Breakdown
+### Multi-Source Input Queuing & Concurrency
 
-**1. Plate Detection (`src/detect_and_crop_plate.py`)**  
+![Multi-Source Input Queuing](docs/assets/multi_source_queuing.png)  
+*Fig 3: Multi-Source Input Queuing and Threading Architecture with ByteTrack Feedback Loop*
+
+---
+
+## Module Breakdown
+
+### 1. Plate Detection (`src/detect_and_crop_plate.py`)
 Loads `rbflw_y8_best.pt` to detect license plate bounding boxes. Enforces minimum size thresholds (`MIN_PLATE_WIDTH = 50px`, `MIN_PLATE_HEIGHT = 15px`) so distant/unreadable plates are skipped rather than wasting an OCR call. Adds 15% padding before cropping.
 
-<p align="center">
-  <img src="docs/assets/yolov8_detection_sample.png" alt="YOLOv8n License Plate Detection" width="85%"/>
-  <br/>
-  <em>Fig 4: Custom YOLOv8n detector locating Pakistani license plate (MNA-17 486) on real-world vehicle test imagery</em>
-</p>
+![YOLOv8n License Plate Detection](docs/assets/yolov8_detection_sample.png)  
+*Fig 4: Custom YOLOv8n detector locating Pakistani license plate (MNA-17 486) on real-world vehicle test imagery*
 
-**2. OCR (`src/recognize_plate.py`)**  
+### 2. OCR (`src/recognize_plate.py`)
 Loads PaddleOCR's `TextRecognition` (recognition-only) engine once, in-memory, at startup. For each plate, computes a whole-crop candidate and a split (top/bottom half) candidate. Applies early-exit to skip enhancement-pass OCR calls when a confident result is already found.
 
-**3. Text Normalization & Region Filtering (`src/normalize_plate.py`)**  
+### 3. Text Normalization & Region Filtering (`src/normalize_plate.py`)
 Converts raw OCR text into a clean, single merged plate string: removes region words (including OCR-joined variants), applies position-aware character correction, strips spaces/dashes/underscores.
 
-**4. Vehicle Authorization & Logging (`src/authorize_vehicle.py`, `src/logger.py`)**  
+### 4. Vehicle Authorization & Logging (`src/authorize_vehicle.py`, `src/logger.py`)
 Matches the normalized plate against `data/vehicles.csv`, determines `AUTHORIZED`/`UNAUTHORIZED` status, and logs every entry attempt (authorized or not) to `data/entry_log.csv` with date, time, image/frame reference, plate number, confidence, and status.
 
-**5. Vehicle Registration (`src/register_vehicle.py`)**  
+### 5. Vehicle Registration (`src/register_vehicle.py`)
 Registers new authorized vehicles using the same OCR pipeline as live detection. User enters the plate as one continuous string, no spaces or dashes (e.g. a two-line plate showing "LE·15" / "1051" should be entered as `LE151051`).
 
 ---
@@ -106,11 +96,8 @@ Registers new authorized vehicles using the same OCR pipeline as live detection.
 
 The custom license plate detection model was trained on Roboflow annotated datasets for 88 epochs (early-stopped at epoch 73) on a Tesla T4 GPU (Google Colab).
 
-<p align="center">
-  <img src="docs/assets/yolov8_training_metrics.png" alt="YOLOv8n Training & Validation Metrics" width="95%"/>
-  <br/>
-  <em>Fig 5: Google Colab YOLOv8n validation metrics: 0.979 Precision, 0.969 Recall, 0.991 mAP@50 at 1.9 ms/image inference</em>
-</p>
+![YOLOv8n Training Metrics](docs/assets/yolov8_training_metrics.png)  
+*Fig 5: Google Colab YOLOv8n validation metrics: 0.979 Precision, 0.969 Recall, 0.991 mAP@50 at 1.9 ms/image inference*
 
 | Metric | Validation Result |
 | :--- | :--- |
@@ -162,43 +149,43 @@ This empirically confirms that webcam latency on the dual-core dev laptop is a h
 
 ---
 
-## Web Application & Cloud Database System
+## Repository Structure
 
-Beyond standalone script inference, SENTRYX provides a full enterprise web tier built with **FastAPI**, **React + Vite**, and a cloud-hosted **Neon PostgreSQL** database.
+```text
+├── data/
+│   ├── entry_log.csv            # Access verification audit log
+│   └── vehicles.csv             # Authorized vehicle database
+├── docs/
+│   └── assets/                  # Architecture diagrams and benchmark figures
+├── img/
+│   ├── input/                   # Test images and sample video streams
+│   └── output/                  # Detection and cropped plate outputs
+├── models/
+│   └── trained/
+│       └── rbflw_y8_best.pt     # Trained YOLOv8n license plate weights
+├── src/
+│   ├── authorize_vehicle.py     # Database matching against vehicles.csv
+│   ├── detect_and_crop_plate.py # YOLOv8 plate detector with 15% padding
+│   ├── logger.py                # Append verification decisions to entry_log.csv
+│   ├── main.py                  # Primary pipeline entry point (image/video/webcam)
+│   ├── normalize_plate.py       # Character correction and region filtering
+│   ├── recognize_plate.py       # In-memory recognition-only PaddleOCR engine
+│   └── register_vehicle.py      # Interactive vehicle registration utility
+├── requirements.txt             # Python dependencies
+└── README.md
+```
 
-### 1. Administration Console & Registration Queue
+---
 
-<p align="center">
-  <img src="docs/assets/admin_verification_console.png" alt="Vehicle Verification Console" width="95%"/>
-  <br/>
-  <em>Fig 6: SENTRYX Administrator Verification Console supporting direct image upload and live camera verification</em>
-</p>
+## Project Context
 
-<p align="center">
-  <img src="docs/assets/admin_registration_queue.png" alt="Vehicle Registration Requests Review Queue" width="95%"/>
-  <br/>
-  <em>Fig 7: Administrative Review Queue for vetting and approving public vehicle registration requests</em>
-</p>
-
-### 2. Relational Database Schema
-
-The persistence layer organizes authorization, public registration requests, and access logging across three core relational tables:
-
-<p align="center">
-  <img src="docs/assets/database_schema.png" alt="Database Schema ER Diagram" width="95%"/>
-  <br/>
-  <em>Fig 8: Relational ER Diagram illustrating interactions between authorized vehicles, pending requests, and immutable access logs</em>
-</p>
-
-* **`authorized_vehicles`**: The master registry of authorized vehicles, personnel names, and models.
-* **`vehicle_registration_requests`**: Holds public self-registration submissions pending administrative review.
-* **`access_logs`**: Immutable audit logs capturing every authorization attempt, timestamp, plate string, and confidence score.
+This repository houses the standalone **Vision Engine** for the SENTRYX vehicle authorization system developed during an internship at the National Engineering and Scientific Commission (NESCOM). In broader team deployments, this vision engine can supply vehicle recognition events to upstream external services; however, this repository specifically focuses on the core computer vision, inference, normalization, and local authorization pipeline.
 
 ---
 
 ## Installation, Setup & Execution
 
-Follow these steps to set up and run SENTRYX on a fresh Windows machine (Windows 10 / 11 64-bit).
+Follow these steps to set up and run the SENTRYX Vision Engine on a fresh Windows machine (Windows 10 / 11 64-bit).
 
 ### 1. Prerequisites
 
@@ -292,10 +279,12 @@ Follow the interactive prompts to enter the Employee ID, Name, Department, Vehic
 * **Supervisor:** Dr. Inayatullah Khan  
   *National Engineering and Scientific Commission (NESCOM), Islamabad, Pakistan*
 
-* **Authors:**
+* **Author:**  
   * **Muhammad Saad** — *National University of Technology (NUTECH), Islamabad*
-  * **Shahid Manzoor** — *National University of Technology (NUTECH), Islamabad*
-  * **Rana Ashhad** — *National University of Technology (NUTECH), Islamabad*
+
+* **Team Collaborators (SENTRYX System):**  
+  * Shahid Manzoor — *National University of Technology (NUTECH), Islamabad*  
+  * Rana Ashhad — *National University of Technology (NUTECH), Islamabad*
 
 * **Project:** SENTRYX — AI-Based Vehicle Authorization Using Automatic License Plate Recognition System  
 * **Host Organization:** National Engineering and Scientific Commission (NESCOM)
