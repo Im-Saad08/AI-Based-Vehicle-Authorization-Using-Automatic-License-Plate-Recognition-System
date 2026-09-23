@@ -95,6 +95,7 @@ Registers new authorized vehicles using the same OCR pipeline as live detection.
 ### 1. YOLOv8n Detection Model Validation
 
 The custom license plate detection model was trained on Roboflow annotated datasets for 88 epochs (early-stopped at epoch 73) on a Tesla T4 GPU (Google Colab).
+
 ![YOLOv8n Detection](docs/assets/yolov8_detection_sample.png)
 
 ![YOLOv8n Training Metrics](docs/assets/yolov8_training_metrics.png)  
